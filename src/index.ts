@@ -4,7 +4,22 @@ import { itemsCollection, votesCollection } from './collections'
 import type { ResolvedRoadmapOptions, RoadmapPluginOptions } from './types'
 
 export type { RoadmapOption, RoadmapPluginOptions, ResolvedRoadmapOptions } from './types'
-export { castVote, findItem, itemKey, recountVotes, removeVote, requestItem, slugify } from './api'
+export {
+  allocateVotes,
+  castVote,
+  findItem,
+  FREE_BALLOT,
+  itemKey,
+  recountVotes,
+  removeVote,
+  RoadmapError,
+  requestItem,
+  slugify,
+  placedOn,
+  unlocksAt,
+  voteBalance,
+  withdrawVotes,
+} from './api'
 export type { RoadmapItemDoc } from './api'
 
 export const DEFAULT_STAGES = [
@@ -22,6 +37,7 @@ const resolve = (o: RoadmapPluginOptions): ResolvedRoadmapOptions => ({
   stages: o.stages?.length ? o.stages : DEFAULT_STAGES,
   subject: o.subject,
   scopeField: o.scopeField,
+  allocation: o.allocation,
   slugs: { items: 'roadmap-items', votes: 'roadmap-votes', ...o.slugs },
   access: {
     manage: o.access?.manage ?? (() => false),

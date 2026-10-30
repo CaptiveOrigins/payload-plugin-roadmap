@@ -1,4 +1,4 @@
-import type { Access, CollectionConfig, PayloadRequest, Where } from 'payload'
+import type { Access, CollectionConfig, Payload, PayloadRequest, Where } from 'payload'
 
 export type RoadmapOption = { label: string; value: string }
 
@@ -38,6 +38,18 @@ export type RoadmapPluginOptions = {
     /** Who may cast/remove their own vote through the REST/GraphQL API. Default: any signed-in user. */
     vote?: Access
   }
+  /**
+   * Extra ("free agent") votes a user can place anywhere, several on one item
+   * or spread across many, on top of their one free vote per item. The app
+   * says how many each user has earned (e.g. from gifts); placed votes are
+   * spent at once and counted from the votes themselves.
+   */
+  allocation?: {
+    /** Votes the user has earned in this scope (whole or fractional; the plugin floors the total). */
+    earned: (args: { payload: Payload; user: string; scope?: string; req?: PayloadRequest }) => Promise<number>
+    /** Days before placed votes can be withdrawn back to the balance. Default 0. */
+    lockDays?: number
+  }
   overrides?: {
     items?: (collection: CollectionConfig) => CollectionConfig
     votes?: (collection: CollectionConfig) => CollectionConfig
@@ -45,7 +57,7 @@ export type RoadmapPluginOptions = {
 }
 
 export type ResolvedRoadmapOptions = Required<Pick<RoadmapPluginOptions, 'usersSlug' | 'boards' | 'stages'>> &
-  Pick<RoadmapPluginOptions, 'subject' | 'scopeField'> & {
+  Pick<RoadmapPluginOptions, 'subject' | 'scopeField' | 'allocation'> & {
     slugs: { items: string; votes: string }
     access: { manage: Access; vote: Access }
   }

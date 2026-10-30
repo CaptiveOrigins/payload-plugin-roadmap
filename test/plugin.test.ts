@@ -1,7 +1,7 @@
 import type { CollectionConfig, Config, PayloadRequest } from 'payload'
 import { describe, expect, it } from 'vitest'
 
-import { itemKey, recountVotes, roadmapPlugin, slugify, type ResolvedRoadmapOptions } from '../src'
+import { allocateVotes, itemKey, recountVotes, roadmapPlugin, slugify, voteBalance, type ResolvedRoadmapOptions } from '../src'
 
 const configure = (options: Parameters<typeof roadmapPlugin>[0] = {}) =>
   roadmapPlugin(options)({ collections: [] } as unknown as Config) as Config & { custom: { roadmap: ResolvedRoadmapOptions } }
@@ -13,7 +13,7 @@ describe('config', () => {
     const config = configure({ subject: { relationTo: 'taxa' }, scopeField: 'tenant' })
     const { 'roadmap-items': items, 'roadmap-votes': votes } = bySlug(config)
     expect(items!.indexes).toEqual([{ fields: ['tenant', 'board', 'key'], unique: true }])
-    expect(votes!.indexes).toEqual([{ fields: ['item', 'user'], unique: true }])
+    expect(votes!.indexes).toEqual([{ fields: ['item', 'user', 'ballot'], unique: true }])
     const names = items!.fields.flatMap((f) => ('fields' in f && f.type === 'row' ? f.fields : [f])).map((f) => ('name' in f ? f.name : null))
     expect(names).toEqual(expect.arrayContaining(['title', 'board', 'stage', 'subject', 'parent', 'voteCount', 'hidden', 'votes']))
     expect(config.custom.roadmap.stages[0]!.value).toBe('requested')
@@ -41,14 +41,34 @@ describe('helpers', () => {
     expect(itemKey(null, 'dark-mode')).toBe('slug:dark-mode')
   })
 
-  it('sets the count from the votes, not by incrementing', async () => {
+  it('sets votes (by weight) and people from the votes, not by incrementing', async () => {
     const updates: unknown[] = []
     const payload = {
       config: configure(),
-      count: async () => ({ totalDocs: 3 }),
+      find: async () => ({ docs: [{ user: 'a', weight: 1 }, { user: 'a', weight: 10 }, { user: 'b', weight: 1 }] }),
       update: async (args: unknown) => updates.push(args),
     }
-    expect(await recountVotes(payload as never, 'i1')).toBe(3)
-    expect(updates[0]).toMatchObject({ collection: 'roadmap-items', id: 'i1', data: { voteCount: 3 } })
+    expect(await recountVotes(payload as never, 'i1')).toBe(12)
+    expect(updates[0]).toMatchObject({ collection: 'roadmap-items', id: 'i1', data: { voteCount: 12, voterCount: 2 } })
+  })
+
+  it('spends placed votes from the earned balance and refuses overspending', async () => {
+    const placed: { weight: number }[] = [{ weight: 2 }]
+    const created: unknown[] = []
+    const payload = {
+      config: configure({ allocation: { earned: async () => 3.5 } }),
+      find: async () => ({ docs: placed }),
+      create: async (args: { data: { weight: number } }) => {
+        created.push(args.data)
+        placed.push({ weight: args.data.weight })
+        return { id: 'v' }
+      },
+      delete: async () => placed.pop(),
+    }
+    expect(await voteBalance(payload as never, { user: 'u' })).toEqual({ earned: 3, spent: 2, available: 1 })
+    await expect(allocateVotes(payload as never, { item: 'i', user: 'u', votes: 2 })).rejects.toThrow(/that many votes/)
+    await allocateVotes(payload as never, { item: 'i', user: 'u', votes: 1 })
+    expect(created).toEqual([expect.objectContaining({ weight: 1, item: 'i', user: 'u' })])
+    expect(await voteBalance(payload as never, { user: 'u' })).toEqual({ earned: 3, spent: 3, available: 0 })
   })
 })

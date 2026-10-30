@@ -1,6 +1,6 @@
 import { APIError, type Access, type CollectionConfig, type CollectionSlug, type Field, type Where } from 'payload'
 
-import { idOf, itemKey, recountVotes, slugify } from './api'
+import { FREE_BALLOT, idOf, itemKey, recountVotes, slugify, unlocksAt } from './api'
 import type { ResolvedRoadmapOptions } from './types'
 
 /** manage, else the signed-in user's own records (by `field`). */
@@ -59,7 +59,14 @@ export const itemsCollection = (opts: ResolvedRoadmapOptions): CollectionConfig 
       type: 'number',
       defaultValue: 0,
       index: true,
-      admin: { position: 'sidebar', readOnly: true, description: 'Counted from the votes.' },
+      admin: { position: 'sidebar', readOnly: true, description: 'Votes, counted from the vote records (placed votes count by weight).' },
+      access: { create: () => false, update: () => false },
+    },
+    {
+      name: 'voterCount',
+      type: 'number',
+      defaultValue: 0,
+      admin: { position: 'sidebar', readOnly: true, description: 'People who voted.' },
       access: { create: () => false, update: () => false },
     },
     {
@@ -79,7 +86,7 @@ export const itemsCollection = (opts: ResolvedRoadmapOptions): CollectionConfig 
   ]
   return {
     slug: opts.slugs.items,
-    admin: { useAsTitle: 'title', group: 'Roadmap', defaultColumns: ['title', 'board', 'stage', 'voteCount', 'updatedAt'] },
+    admin: { useAsTitle: 'title', group: 'Roadmap', defaultColumns: ['title', 'board', 'stage', 'voterCount', 'voteCount', 'updatedAt'] },
     access: {
       create: manage,
       update: manage,
@@ -111,6 +118,8 @@ export const itemsCollection = (opts: ResolvedRoadmapOptions): CollectionConfig 
                 collection: opts.slugs.items as CollectionSlug,
                 where: { and: scoped([{ board: { equals: doc.board } }, { key: { equals: `subject:${parentSubject}` } }], doc) },
                 limit: 1,
+                // One query (no count) inside the caller's transaction.
+                pagination: false,
                 depth: 0,
                 overrideAccess: true,
                 req,
@@ -150,25 +159,39 @@ export const votesCollection = (opts: ResolvedRoadmapOptions): CollectionConfig 
   const { manage, vote } = opts.access
   return {
     slug: opts.slugs.votes,
-    admin: { group: 'Roadmap', defaultColumns: ['item', 'user', 'createdAt'] },
+    admin: { group: 'Roadmap', defaultColumns: ['item', 'user', 'weight', 'createdAt'] },
     access: {
       create: vote,
       read: manageOrOwn(manage, 'user'),
       delete: manageOrOwn(manage, 'user'),
       update: manage,
     },
-    indexes: [{ fields: ['item', 'user'], unique: true }],
+    // One free vote per user per item; each placement of extra votes has its own ballot.
+    indexes: [{ fields: ['item', 'user', 'ballot'], unique: true }],
     fields: [
       { name: 'item', type: 'relationship', relationTo: opts.slugs.items as CollectionSlug, required: true, index: true },
       { name: 'user', type: 'relationship', relationTo: opts.usersSlug as CollectionSlug, required: true, index: true },
+      {
+        name: 'ballot',
+        type: 'text',
+        required: true,
+        defaultValue: FREE_BALLOT,
+        index: true,
+        admin: { readOnly: true, description: '"free" for the one free vote; extra votes placed from a balance have their own.' },
+      },
+      { name: 'weight', type: 'number', required: true, defaultValue: 1, min: 1, admin: { readOnly: true } },
       { name: 'note', type: 'textarea', maxLength: 1000, admin: { description: 'Why the voter wants this (curators only).' } },
     ],
     hooks: {
       beforeChange: [
         async ({ data, operation, req }) => {
           if (operation !== 'create') return data
-          // API voters vote as themselves.
-          if (req.user && req.user.collection === opts.usersSlug && (await manage({ req })) !== true) data.user = req.user.id
+          // API voters cast their own free vote; extra votes go through allocateVotes.
+          if (req.user && req.user.collection === opts.usersSlug && (await manage({ req })) !== true) {
+            data.user = req.user.id
+            data.ballot = FREE_BALLOT
+            data.weight = 1
+          }
           const item = await req.payload.findByID({
             collection: opts.slugs.items as CollectionSlug,
             id: idOf(data.item),
@@ -186,6 +209,17 @@ export const votesCollection = (opts: ResolvedRoadmapOptions): CollectionConfig 
         async ({ doc, operation, req }) => {
           if (operation === 'create') await recountVotes(req.payload, idOf(doc.item), req)
           return doc
+        },
+      ],
+      beforeDelete: [
+        // Voters can't withdraw placed votes through the API before they unlock.
+        async ({ id, req }) => {
+          if (!req.user || (await manage({ req })) === true) return
+          const vote = (await req.payload.findByID({ collection: opts.slugs.votes as CollectionSlug, id, depth: 0, overrideAccess: true, req })) as unknown as {
+            ballot?: string
+            createdAt: string
+          }
+          if (vote.ballot !== FREE_BALLOT && unlocksAt(opts, vote.createdAt)) throw new APIError('These votes are still committed.', 403)
         },
       ],
       afterDelete: [
