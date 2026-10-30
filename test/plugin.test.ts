@@ -1,7 +1,7 @@
 import type { CollectionConfig, Config, PayloadRequest } from 'payload'
 import { describe, expect, it } from 'vitest'
 
-import { allocateVotes, itemKey, recountVotes, roadmapPlugin, slugify, voteBalance, type ResolvedRoadmapOptions } from '../src'
+import { allocateVotes, itemKey, recountVotes, roadmapPlugin, slugify, unlocksAt, voteBalance, type ResolvedRoadmapOptions } from '../src'
 
 const configure = (options: Parameters<typeof roadmapPlugin>[0] = {}) =>
   roadmapPlugin(options)({ collections: [] } as unknown as Config) as Config & { custom: { roadmap: ResolvedRoadmapOptions } }
@@ -57,6 +57,7 @@ describe('helpers', () => {
     const created: unknown[] = []
     const payload = {
       config: configure({ allocation: { earned: async () => 3.5 } }),
+      findByID: async () => ({ id: 'i', board: 'features', stage: 'requested' }),
       find: async () => ({ docs: placed }),
       create: async (args: { data: { weight: number } }) => {
         created.push(args.data)
@@ -70,5 +71,25 @@ describe('helpers', () => {
     await allocateVotes(payload as never, { item: 'i', user: 'u', votes: 1 })
     expect(created).toEqual([expect.objectContaining({ weight: 1, item: 'i', user: 'u' })])
     expect(await voteBalance(payload as never, { user: 'u' })).toEqual({ earned: 3, spent: 3, available: 0 })
+  })
+
+  it('limits extra votes to some boards and releases them on some stages', async () => {
+    const config = configure({ allocation: { earned: async () => 5, lockDays: 183, boards: ['species'], releaseStages: ['declined'] } })
+    const payload = (item: object) => ({ config, findByID: async () => item, find: async () => ({ docs: [] }) })
+    await expect(
+      allocateVotes(payload({ id: 'i', board: 'features', stage: 'requested' }) as never, { item: 'i', user: 'u', votes: 1 }),
+    ).rejects.toThrow(/can’t be placed/)
+    await expect(
+      allocateVotes(payload({ id: 'i', board: 'species', stage: 'declined' }) as never, { item: 'i', user: 'u', votes: 1 }),
+    ).rejects.toThrow(/not planned/)
+    const now = new Date().toISOString()
+    expect(unlocksAt(config.custom.roadmap, now, 'planned')).not.toBeNull()
+    expect(unlocksAt(config.custom.roadmap, now, 'declined')).toBeNull()
+  })
+
+  it('adds merge and keep fields', () => {
+    const { 'roadmap-items': items, 'roadmap-votes': votes } = bySlug(configure())
+    expect(items!.fields.some((f) => 'name' in f && f.name === 'mergedInto')).toBe(true)
+    expect(votes!.fields.some((f) => 'name' in f && f.name === 'kept')).toBe(true)
   })
 })

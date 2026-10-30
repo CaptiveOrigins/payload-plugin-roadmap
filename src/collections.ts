@@ -1,6 +1,6 @@
 import { APIError, type Access, type CollectionConfig, type CollectionSlug, type Field, type Where } from 'payload'
 
-import { FREE_BALLOT, idOf, itemKey, recountVotes, slugify, unlocksAt } from './api'
+import { FREE_BALLOT, idOf, itemKey, mergeItems, recountVotes, releases, slugify, unlocksAt } from './api'
 import type { ResolvedRoadmapOptions } from './types'
 
 /** manage, else the signed-in user's own records (by `field`). */
@@ -76,6 +76,18 @@ export const itemsCollection = (opts: ResolvedRoadmapOptions): CollectionConfig 
       admin: { position: 'sidebar', description: 'Hide from the public roadmap (spam, duplicates).' },
     },
     {
+      name: 'mergedInto',
+      type: 'relationship',
+      relationTo: opts.slugs.items as CollectionSlug,
+      admin: {
+        position: 'sidebar',
+        description: 'Combine this item into a similar one: its votes move there and this item is hidden. Cannot be undone.',
+      },
+      filterOptions: ({ id, data }): Where => ({
+        and: [{ id: { not_equals: id } }, { board: { equals: data?.board } }, { mergedInto: { exists: false } }] as Where[],
+      }),
+    },
+    {
       name: 'requestedBy',
       type: 'relationship',
       relationTo: opts.usersSlug as CollectionSlug,
@@ -104,6 +116,26 @@ export const itemsCollection = (opts: ResolvedRoadmapOptions): CollectionConfig 
     hooks: {
       beforeChange: [
         async ({ data, originalDoc, operation, req }) => {
+          if (data.mergedInto && idOf(data.mergedInto) !== idOf(originalDoc?.mergedInto)) {
+            if (originalDoc?.mergedInto) throw new APIError('This item was already merged.', 400)
+            const into = (await req.payload.findByID({
+              collection: opts.slugs.items as CollectionSlug,
+              id: idOf(data.mergedInto),
+              depth: 0,
+              overrideAccess: true,
+              disableErrors: true,
+              req,
+            })) as Record<string, unknown> | null
+            const doc = { ...originalDoc, ...data }
+            if (
+              !into ||
+              into.id === originalDoc?.id ||
+              into.mergedInto ||
+              into.board !== doc.board ||
+              (opts.scopeField && idOf(into[opts.scopeField]) !== idOf(doc[opts.scopeField]))
+            )
+              throw new APIError('Merge into another live item on the same roadmap.', 400)
+          }
           const slug = data.slug || originalDoc?.slug || slugify(String(data.title ?? originalDoc?.title ?? ''))
           if (!slug) throw new APIError('A title is required.', 400)
           const subject = 'subject' in data ? data.subject : originalDoc?.subject
@@ -131,6 +163,21 @@ export const itemsCollection = (opts: ResolvedRoadmapOptions): CollectionConfig 
         },
       ],
       afterChange: [
+        // Merging, and asking voters again when an item enters a release stage.
+        async ({ doc, previousDoc, operation, req, context }) => {
+          if (context.roadmapInternal || operation !== 'update') return doc
+          if (doc.mergedInto && !previousDoc?.mergedInto)
+            await mergeItems(req.payload, { from: doc.id, into: idOf(doc.mergedInto), req })
+          else if (releases(opts, doc.stage) && !releases(opts, previousDoc?.stage))
+            await req.payload.update({
+              collection: opts.slugs.votes as CollectionSlug,
+              where: { and: [{ item: { equals: doc.id } }, { kept: { equals: true } }] },
+              data: { kept: false } as never,
+              overrideAccess: true,
+              req,
+            })
+          return doc
+        },
         // An item for a parent subject adopts the existing items of its children.
         async ({ doc, previousDoc, operation, req, context }) => {
           if (context.roadmapInternal || !opts.subject?.parentOf || !idOf(doc.subject)) return doc
@@ -181,6 +228,12 @@ export const votesCollection = (opts: ResolvedRoadmapOptions): CollectionConfig 
       },
       { name: 'weight', type: 'number', required: true, defaultValue: 1, min: 1, admin: { readOnly: true } },
       { name: 'note', type: 'textarea', maxLength: 1000, admin: { description: 'Why the voter wants this (curators only).' } },
+      {
+        name: 'kept',
+        type: 'checkbox',
+        defaultValue: false,
+        admin: { readOnly: true, description: 'The voter chose to keep these placed votes on an item that released them.' },
+      },
     ],
     hooks: {
       beforeChange: [
@@ -215,11 +268,13 @@ export const votesCollection = (opts: ResolvedRoadmapOptions): CollectionConfig 
         // Voters can't withdraw placed votes through the API before they unlock.
         async ({ id, req }) => {
           if (!req.user || (await manage({ req })) === true) return
-          const vote = (await req.payload.findByID({ collection: opts.slugs.votes as CollectionSlug, id, depth: 0, overrideAccess: true, req })) as unknown as {
+          const vote = (await req.payload.findByID({ collection: opts.slugs.votes as CollectionSlug, id, depth: 1, overrideAccess: true, req })) as unknown as {
             ballot?: string
             createdAt: string
+            item?: { stage?: string } | string
           }
-          if (vote.ballot !== FREE_BALLOT && unlocksAt(opts, vote.createdAt)) throw new APIError('These votes are still committed.', 403)
+          const stage = typeof vote.item === 'object' ? vote.item?.stage : undefined
+          if (vote.ballot !== FREE_BALLOT && unlocksAt(opts, vote.createdAt, stage)) throw new APIError('These votes are still committed.', 403)
         },
       ],
       afterDelete: [

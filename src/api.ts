@@ -137,6 +137,19 @@ const placedVotes = async (payload: Payload, user: string, scope?: string, item?
   ).docs as unknown as VoteDoc[]
 }
 
+const getItem = async (payload: Payload, id: string) =>
+  (await payload.findByID({
+    collection: optionsOf(payload).slugs.items as CollectionSlug,
+    id,
+    depth: 0,
+    overrideAccess: true,
+    disableErrors: true,
+  })) as unknown as RoadmapItemDoc | null
+
+/** Whether an item's stage releases placed votes (e.g. "declined"). */
+export const releases = (opts: ResolvedRoadmapOptions, stage?: string | null) =>
+  Boolean(stage && opts.allocation?.releaseStages?.includes(stage))
+
 /** Earned, spent and available extra votes for a user (in a scope). */
 export async function voteBalance(payload: Payload, args: { user: string; scope?: string }) {
   const opts = optionsOf(payload)
@@ -156,6 +169,10 @@ export async function allocateVotes(payload: Payload, args: { item: string; user
   const votes = Math.floor(Number(args.votes))
   if (!opts.allocation) throw new RoadmapError('Extra votes are not enabled.')
   if (!(votes >= 1)) throw new RoadmapError('Choose at least one vote.')
+  const item = await getItem(payload, args.item)
+  if (!item || item.hidden) throw new RoadmapError('That roadmap item is not open for votes.')
+  if (opts.allocation.boards && !opts.allocation.boards.includes(item.board)) throw new RoadmapError('Extra votes can’t be placed on this roadmap.')
+  if (releases(opts, item.stage)) throw new RoadmapError('This item is not planned, so it can’t take extra votes.')
   if ((await voteBalance(payload, args)).available < votes) throw new RoadmapError('You don’t have that many votes available.')
   const vote = (await payload.create({
     collection: opts.slugs.votes as CollectionSlug,
@@ -176,8 +193,12 @@ export async function allocateVotes(payload: Payload, args: { item: string; user
   return vote
 }
 
-/** When placed votes on an item can be withdrawn (ISO date), or null if now. */
-export const unlocksAt = (opts: ResolvedRoadmapOptions, createdAt: string) => {
+/**
+ * When placed votes can be withdrawn (ISO date), or null if now. Votes on an
+ * item in a release stage can be withdrawn at once.
+ */
+export const unlocksAt = (opts: ResolvedRoadmapOptions, createdAt: string, stage?: string | null) => {
+  if (releases(opts, stage)) return null
   const days = opts.allocation?.lockDays ?? 0
   const at = new Date(new Date(createdAt).getTime() + days * 864e5)
   return at.getTime() > Date.now() ? at.toISOString() : null
@@ -186,9 +207,10 @@ export const unlocksAt = (opts: ResolvedRoadmapOptions, createdAt: string) => {
 /** Return the user's unlocked placed votes on an item to their balance; locked ones stay. */
 export async function withdrawVotes(payload: Payload, args: { item: string; user: string; scope?: string }) {
   const opts = optionsOf(payload)
+  const stage = (await getItem(payload, args.item))?.stage
   let returned = 0
   for (const v of await placedVotes(payload, args.user, args.scope, args.item)) {
-    if (unlocksAt(opts, v.createdAt)) continue
+    if (unlocksAt(opts, v.createdAt, stage)) continue
     await payload.delete({ collection: opts.slugs.votes as CollectionSlug, id: v.id, overrideAccess: true })
     returned += v.weight ?? 0
   }
@@ -198,13 +220,109 @@ export async function withdrawVotes(payload: Payload, args: { item: string; user
 /** The user's placed votes on an item: total, and how many are still locked (until when). */
 export async function placedOn(payload: Payload, args: { item: string; user: string; scope?: string }) {
   const opts = optionsOf(payload)
+  const stage = (await getItem(payload, args.item))?.stage
   const votes = await placedVotes(payload, args.user, args.scope, args.item)
-  const locked = votes.filter((v) => unlocksAt(opts, v.createdAt))
+  const locked = votes.filter((v) => unlocksAt(opts, v.createdAt, stage))
   return {
     votes: votes.reduce((n, v) => n + (v.weight ?? 0), 0),
     locked: locked.reduce((n, v) => n + (v.weight ?? 0), 0),
-    lockedUntil: locked.map((v) => unlocksAt(opts, v.createdAt)!).sort().at(-1) ?? null,
+    lockedUntil: locked.map((v) => unlocksAt(opts, v.createdAt, stage)!).sort().at(-1) ?? null,
+    released: releases(opts, stage),
   }
+}
+
+/**
+ * Items in a release stage where the user still has placed votes they have not
+ * chosen to keep: the voter is asked to move them (`withdrawVotes`) or keep
+ * them (`keepVotes`).
+ */
+export async function releasedVotes(payload: Payload, args: { user: string; scope?: string }) {
+  const opts = optionsOf(payload)
+  if (!opts.allocation?.releaseStages?.length) return []
+  const pending = (await placedVotes(payload, args.user, args.scope)).filter((v) => !(v as { kept?: boolean }).kept)
+  if (!pending.length) return []
+  const { docs } = await payload.find({
+    collection: opts.slugs.items as CollectionSlug,
+    where: { and: [{ id: { in: [...new Set(pending.map((v) => idOf(v.item)))] } }, { stage: { in: opts.allocation.releaseStages } }] },
+    pagination: false,
+    depth: 0,
+    overrideAccess: true,
+  })
+  return (docs as unknown as RoadmapItemDoc[]).map((item) => ({
+    item,
+    votes: pending.filter((v) => idOf(v.item) === item.id).reduce((n, v) => n + (v.weight ?? 0), 0),
+  }))
+}
+
+/** Keep placed votes on a released item (the voter's answer to `releasedVotes`). */
+export async function keepVotes(payload: Payload, args: { item: string; user: string; scope?: string }) {
+  const opts = optionsOf(payload)
+  const votes = await placedVotes(payload, args.user, args.scope, args.item)
+  for (const v of votes)
+    await payload.update({
+      collection: opts.slugs.votes as CollectionSlug,
+      id: v.id,
+      data: { kept: true } as never,
+      overrideAccess: true,
+    })
+  return votes.reduce((n, v) => n + (v.weight ?? 0), 0)
+}
+
+/**
+ * Combine `from` into `into` (similar requests): votes move over (a voter's
+ * second free vote is dropped, placed votes keep their weight and date),
+ * children move too, and `from` is hidden and points at `into`, so later
+ * requests for it land on `into`.
+ */
+export async function mergeItems(payload: Payload, args: { from: string; into: string; req?: PayloadRequest }) {
+  const opts = optionsOf(payload)
+  const { req } = args
+  if (args.from === args.into) throw new RoadmapError('An item can’t be merged into itself.')
+  const find = async (where: Where) =>
+    (
+      await payload.find({
+        collection: opts.slugs.votes as CollectionSlug,
+        where,
+        pagination: false,
+        depth: 0,
+        overrideAccess: true,
+        req,
+      })
+    ).docs as unknown as VoteDoc[]
+  const freeOnTarget = new Set(
+    (await find({ and: [{ item: { equals: args.into } }, { ballot: { equals: FREE_BALLOT } }] })).map((v) => idOf(v.user)),
+  )
+  for (const v of await find({ item: { equals: args.from } })) {
+    if (v.ballot === FREE_BALLOT && freeOnTarget.has(idOf(v.user))) {
+      await payload.delete({ collection: opts.slugs.votes as CollectionSlug, id: v.id, overrideAccess: true, context: { roadmapInternal: true }, req })
+      continue
+    }
+    await payload.update({
+      collection: opts.slugs.votes as CollectionSlug,
+      id: v.id,
+      data: { item: args.into } as never,
+      overrideAccess: true,
+      req,
+    })
+  }
+  await payload.update({
+    collection: opts.slugs.items as CollectionSlug,
+    where: { parent: { equals: args.from } },
+    data: { parent: args.into } as never,
+    overrideAccess: true,
+    context: { roadmapInternal: true },
+    req,
+  })
+  await payload.update({
+    collection: opts.slugs.items as CollectionSlug,
+    id: args.from,
+    data: { hidden: true, mergedInto: args.into } as never,
+    overrideAccess: true,
+    context: { roadmapInternal: true },
+    req,
+  })
+  await recountVotes(payload, args.from, req)
+  return recountVotes(payload, args.into, req)
 }
 
 /** The item for this subject (or slug) on a board, within a scope. */
@@ -250,6 +368,12 @@ export async function requestItem(
       if (!isDuplicate(error)) throw error
       item = (await findItem(payload, { board: args.board, key, scope: args.scope }))!
     }
+  }
+  // A merged item sends requests on to the one it was merged into.
+  for (let hops = 0; item.mergedInto && hops < 5; hops++) {
+    const next = await getItem(payload, idOf(item.mergedInto))
+    if (!next) break
+    item = next
   }
   const vote = args.user ? await castVote(payload, { item: item.id, user: args.user, note: args.note }) : null
   return { item, created, vote }

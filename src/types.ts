@@ -49,6 +49,13 @@ export type RoadmapPluginOptions = {
     earned: (args: { payload: Payload; user: string; scope?: string; req?: PayloadRequest }) => Promise<number>
     /** Days before placed votes can be withdrawn back to the balance. Default 0. */
     lockDays?: number
+    /** Boards that accept placed votes. Default: all. */
+    boards?: string[]
+    /**
+     * Stages that release placed votes at once (e.g. "declined"): the voter
+     * chooses to move them (withdraw, whatever the lock) or keep them there.
+     */
+    releaseStages?: string[]
   }
   overrides?: {
     items?: (collection: CollectionConfig) => CollectionConfig
