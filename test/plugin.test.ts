@@ -1,0 +1,54 @@
+import type { CollectionConfig, Config, PayloadRequest } from 'payload'
+import { describe, expect, it } from 'vitest'
+
+import { itemKey, recountVotes, roadmapPlugin, slugify, type ResolvedRoadmapOptions } from '../src'
+
+const configure = (options: Parameters<typeof roadmapPlugin>[0] = {}) =>
+  roadmapPlugin(options)({ collections: [] } as unknown as Config) as Config & { custom: { roadmap: ResolvedRoadmapOptions } }
+const bySlug = (config: Config) => Object.fromEntries((config.collections ?? []).map((c) => [c.slug, c])) as Record<string, CollectionConfig>
+const req = (user?: object) => ({ user: user ?? null }) as unknown as PayloadRequest
+
+describe('config', () => {
+  it('adds items and votes with one vote per user per item and one item per subject per board', () => {
+    const config = configure({ subject: { relationTo: 'taxa' }, scopeField: 'tenant' })
+    const { 'roadmap-items': items, 'roadmap-votes': votes } = bySlug(config)
+    expect(items!.indexes).toEqual([{ fields: ['tenant', 'board', 'key'], unique: true }])
+    expect(votes!.indexes).toEqual([{ fields: ['item', 'user'], unique: true }])
+    const names = items!.fields.flatMap((f) => ('fields' in f && f.type === 'row' ? f.fields : [f])).map((f) => ('name' in f ? f.name : null))
+    expect(names).toEqual(expect.arrayContaining(['title', 'board', 'stage', 'subject', 'parent', 'voteCount', 'hidden', 'votes']))
+    expect(config.custom.roadmap.stages[0]!.value).toBe('requested')
+  })
+
+  it('denies management by default, lets signed-in users vote, and shows the public only visible items', async () => {
+    const { 'roadmap-items': items, 'roadmap-votes': votes } = bySlug(configure())
+    expect(await items!.access!.update!({ req: req({ id: 'u1' }) } as never)).toBe(false)
+    expect(await items!.access!.read!({ req: req() } as never)).toEqual({ hidden: { not_equals: true } })
+    expect(await votes!.access!.create!({ req: req() } as never)).toBe(false)
+    expect(await votes!.access!.create!({ req: req({ id: 'u1' }) } as never)).toBe(true)
+    expect(await votes!.access!.read!({ req: req({ id: 'u1' }) } as never)).toEqual({ user: { equals: 'u1' } })
+  })
+
+  it('applies overrides', () => {
+    const config = configure({ overrides: { items: (c) => ({ ...c, admin: { ...c.admin, group: 'Plans' } }) } })
+    expect(bySlug(config)['roadmap-items']!.admin!.group).toBe('Plans')
+  })
+})
+
+describe('helpers', () => {
+  it('derives slugs and keys', () => {
+    expect(slugify('Testudo graeca ibera')).toBe('testudo-graeca-ibera')
+    expect(itemKey('t1', 'x')).toBe('subject:t1')
+    expect(itemKey(null, 'dark-mode')).toBe('slug:dark-mode')
+  })
+
+  it('sets the count from the votes, not by incrementing', async () => {
+    const updates: unknown[] = []
+    const payload = {
+      config: configure(),
+      count: async () => ({ totalDocs: 3 }),
+      update: async (args: unknown) => updates.push(args),
+    }
+    expect(await recountVotes(payload as never, 'i1')).toBe(3)
+    expect(updates[0]).toMatchObject({ collection: 'roadmap-items', id: 'i1', data: { voteCount: 3 } })
+  })
+})
