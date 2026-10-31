@@ -19,11 +19,11 @@ Built for [Captive Origins](https://captiveorigins.com)'s Species Roadmap.
 ## Install
 
 ```bash
-npm install payload-plugin-roadmap
+npm install @captiveorigins/payload-plugin-roadmap
 ```
 
 ```ts
-import { roadmapPlugin } from 'payload-plugin-roadmap'
+import { roadmapPlugin } from '@captiveorigins/payload-plugin-roadmap'
 
 export default buildConfig({
   plugins: [
@@ -93,7 +93,7 @@ Without fields there is no notices collection.
 For server actions and endpoints that have already checked the user and scope (they run with `overrideAccess`):
 
 ```ts
-import { castVote, removeVote, requestItem, recountVotes } from 'payload-plugin-roadmap'
+import { castVote, removeVote, requestItem, recountVotes } from '@captiveorigins/payload-plugin-roadmap'
 
 await requestItem(payload, { board: 'species', title: 'Testudo graeca', subject: taxonId, scope: tenantId, user: userId })
 await castVote(payload, { item, user })   // returns the existing vote if there is one

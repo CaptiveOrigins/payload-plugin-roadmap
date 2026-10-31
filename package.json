@@ -1,5 +1,5 @@
 {
-  "name": "payload-plugin-roadmap",
+  "name": "@captiveorigins/payload-plugin-roadmap",
   "version": "0.2.0",
   "description": "Public roadmap and voting for Payload: items in curator-set stages, one vote per user per item, deduplicated requests by subject, parent grouping.",
   "keywords": [
