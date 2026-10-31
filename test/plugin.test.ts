@@ -1,7 +1,7 @@
 import type { CollectionConfig, Config, PayloadRequest } from 'payload'
 import { describe, expect, it } from 'vitest'
 
-import { allocateVotes, itemKey, recountVotes, roadmapPlugin, slugify, unlocksAt, voteBalance, type ResolvedRoadmapOptions } from '../src'
+import { allocateVotes, itemKey, matchingNotices, recountVotes, roadmapPlugin, slugify, unlocksAt, voteBalance, type NoticeRule, type ResolvedRoadmapOptions } from '../src'
 
 const configure = (options: Parameters<typeof roadmapPlugin>[0] = {}) =>
   roadmapPlugin(options)({ collections: [] } as unknown as Config) as Config & { custom: { roadmap: ResolvedRoadmapOptions } }
@@ -91,5 +91,26 @@ describe('helpers', () => {
     const { 'roadmap-items': items, 'roadmap-votes': votes } = bySlug(configure())
     expect(items!.fields.some((f) => 'name' in f && f.name === 'mergedInto')).toBe(true)
     expect(votes!.fields.some((f) => 'name' in f && f.name === 'kept')).toBe(true)
+  })
+})
+
+describe('notices', () => {
+  const fields = [{ name: 'cites', label: 'CITES', boards: ['species'], options: [{ label: 'I', value: 'I' }, { label: 'II', value: 'II' }] }]
+  const collectionsOf = (notices?: { fields: typeof fields }) =>
+    (configure({ notices }).collections ?? []).map((c) => c.slug)
+
+  it('adds a notices collection only when fields are configured', () => {
+    expect(collectionsOf()).toEqual(['roadmap-items', 'roadmap-votes'])
+    expect(collectionsOf({ fields })).toEqual(['roadmap-items', 'roadmap-votes', 'roadmap-notices'])
+  })
+
+  it('matches rules whose ticked values meet the entry’s values', () => {
+    const rules: NoticeRule[] = [
+      { id: 'a', message: 'Protected', confirm: true, when: { cites: ['I'] } },
+      { id: 'b', message: 'Trade permits', confirm: false, when: { cites: ['II'] } },
+    ]
+    expect(matchingNotices(rules, { cites: ['I', 'II'] }).map((n) => n.id)).toEqual(['a', 'b'])
+    expect(matchingNotices(rules, { cites: ['II'] })).toEqual([{ id: 'b', message: 'Trade permits', confirm: false }])
+    expect(matchingNotices(rules, {})).toEqual([])
   })
 })

@@ -1,9 +1,12 @@
 import type { Plugin } from 'payload'
 
 import { itemsCollection, votesCollection } from './collections'
+import { noticesCollection } from './notices'
 import type { ResolvedRoadmapOptions, RoadmapPluginOptions } from './types'
 
-export type { RoadmapOption, RoadmapPluginOptions, ResolvedRoadmapOptions } from './types'
+export type { RoadmapNotice, RoadmapNoticeField, RoadmapOption, RoadmapPluginOptions, ResolvedRoadmapOptions } from './types'
+export { getNoticeRules, matchingNotices } from './notices'
+export type { NoticeRule } from './notices'
 export {
   allocateVotes,
   castVote,
@@ -42,7 +45,8 @@ const resolve = (o: RoadmapPluginOptions): ResolvedRoadmapOptions => ({
   subject: o.subject,
   scopeField: o.scopeField,
   allocation: o.allocation,
-  slugs: { items: 'roadmap-items', votes: 'roadmap-votes', ...o.slugs },
+  slugs: { items: 'roadmap-items', votes: 'roadmap-votes', notices: 'roadmap-notices', ...o.slugs },
+  notices: { fields: o.notices?.fields ?? [] },
   access: {
     manage: o.access?.manage ?? (() => false),
     vote: o.access?.vote ?? (({ req }) => Boolean(req.user)),
@@ -61,9 +65,10 @@ export const roadmapPlugin =
     const opts = resolve(options)
     const items = (options.overrides?.items ?? ((c) => c))(itemsCollection(opts))
     const votes = (options.overrides?.votes ?? ((c) => c))(votesCollection(opts))
+    const notices = opts.notices.fields.length ? [(options.overrides?.notices ?? ((c) => c))(noticesCollection(opts))] : []
     return {
       ...config,
-      collections: [...(config.collections ?? []), items, votes],
+      collections: [...(config.collections ?? []), items, votes, ...notices],
       custom: { ...config.custom, roadmap: opts },
     }
   }

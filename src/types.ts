@@ -2,8 +2,20 @@ import type { Access, CollectionConfig, Payload, PayloadRequest, Where } from 'p
 
 export type RoadmapOption = { label: string; value: string }
 
+/** A fact about items that notice rules can match on (e.g. a taxon's CITES appendix). */
+export type RoadmapNoticeField = {
+  name: string
+  label: string
+  options: RoadmapOption[]
+  /** Boards the field applies to. Default: all. */
+  boards?: string[]
+}
+
+/** A notice that matched an item: shown to voters, optionally asking them to confirm first. */
+export type RoadmapNotice = { id: string; message: string; confirm: boolean }
+
 export type RoadmapPluginOptions = {
-  slugs?: { items?: string; votes?: string }
+  slugs?: { items?: string; votes?: string; notices?: string }
   /** The auth collection whose accounts vote. Default 'users'. */
   usersSlug?: string
   /** Separate roadmaps, e.g. features and species. Default: one board, "features". */
@@ -57,14 +69,23 @@ export type RoadmapPluginOptions = {
      */
     releaseStages?: string[]
   }
+  /**
+   * Conditional notices: editors write messages shown when an item (or a
+   * subject about to be requested) has certain values, e.g. "CITES I" on the
+   * species board. The app declares the fields and computes each item's
+   * values (`matchingNotices`). No fields: no notices collection.
+   */
+  notices?: { fields: RoadmapNoticeField[] }
   overrides?: {
     items?: (collection: CollectionConfig) => CollectionConfig
     votes?: (collection: CollectionConfig) => CollectionConfig
+    notices?: (collection: CollectionConfig) => CollectionConfig
   }
 }
 
 export type ResolvedRoadmapOptions = Required<Pick<RoadmapPluginOptions, 'usersSlug' | 'boards' | 'stages'>> &
   Pick<RoadmapPluginOptions, 'subject' | 'scopeField' | 'allocation'> & {
-    slugs: { items: string; votes: string }
+    slugs: { items: string; votes: string; notices: string }
+    notices: { fields: RoadmapNoticeField[] }
     access: { manage: Access; vote: Access }
   }
