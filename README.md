@@ -103,7 +103,7 @@ Render it on a page:
 ```ts
 import { getCatalog } from '@captiveorigins/payload-plugin-roadmap'
 
-const sections = await getCatalog(payload, { scope: tenantId })
+const sections = await getCatalog(payload, { scope: tenantId, locale: 'de', fallbackLocale: 'en' })
 // [{ slug, title, summary, intro, entries: [{ slug, title, summary, status, details, links, votes }] }]
 ```
 

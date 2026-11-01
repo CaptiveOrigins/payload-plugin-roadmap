@@ -1,4 +1,4 @@
-import type { CollectionConfig, CollectionSlug, Field, Payload, PayloadRequest, Where } from 'payload'
+import type { CollectionConfig, CollectionSlug, Field, Payload, PayloadRequest, TypedLocale, Where } from 'payload'
 
 import { idOf, slugify } from './api'
 import type { CatalogStatus, ResolvedRoadmapOptions } from './types'
@@ -119,12 +119,24 @@ type ItemDoc = {
  */
 export async function getCatalog(
   payload: Payload,
-  args: { scope?: string; board?: string; req?: Partial<PayloadRequest>; overrideAccess?: boolean } = {},
+  args: {
+    scope?: string
+    board?: string
+    /** Language to read, with your `localization`; untranslated fields fall back to `fallbackLocale`. */
+    locale?: string
+    fallbackLocale?: string | false
+    req?: Partial<PayloadRequest>
+    overrideAccess?: boolean
+  } = {},
 ): Promise<CatalogSection[]> {
   const opts = payload.config.custom.roadmap as ResolvedRoadmapOptions
   if (!opts.catalog) throw new Error('The roadmap catalog is not enabled.')
   const scoped = (where: Where[]): Where => ({ and: [...where, ...(opts.scopeField && args.scope ? [{ [opts.scopeField]: { equals: args.scope } }] : [])] })
-  const read = { overrideAccess: args.overrideAccess ?? false, req: args.req, depth: 0, pagination: false as const }
+  const language = {
+    ...(args.locale ? { locale: args.locale as TypedLocale } : {}),
+    ...(args.fallbackLocale !== undefined ? { fallbackLocale: args.fallbackLocale as TypedLocale | false } : {}),
+  }
+  const read = { overrideAccess: args.overrideAccess ?? false, req: args.req, depth: 0, pagination: false as const, ...language }
   const [categories, items] = await Promise.all([
     payload.find({ collection: opts.slugs.categories as CollectionSlug, where: scoped([]), sort: 'order', ...read }),
     payload.find({

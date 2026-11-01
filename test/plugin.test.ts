@@ -153,5 +153,12 @@ describe('catalog', () => {
       ['empty', []],
     ])
     expect(JSON.stringify(calls[1]!.where)).toContain('"tenant":{"equals":"t1"}')
+    expect(calls[0]).not.toHaveProperty('locale')
+    calls.length = 0
+    await getCatalog(payload as never, { scope: 't1', locale: 'de', fallbackLocale: 'en' })
+    expect(calls.map((c) => [(c as { locale?: string }).locale, (c as { fallbackLocale?: string }).fallbackLocale])).toEqual([
+      ['de', 'en'],
+      ['de', 'en'],
+    ])
   })
 })
