@@ -1,6 +1,7 @@
 import { APIError, type Access, type CollectionConfig, type CollectionSlug, type Field, type Where } from 'payload'
 
 import { FREE_BALLOT, idOf, itemKey, mergeItems, recountVotes, releases, slugify, unlocksAt } from './api'
+import { catalogItemFields } from './catalog'
 import type { ResolvedRoadmapOptions } from './types'
 
 /** manage, else the signed-in user's own records (by `field`). */
@@ -95,6 +96,7 @@ export const itemsCollection = (opts: ResolvedRoadmapOptions): CollectionConfig 
       access: { read: ({ req }) => Boolean(req.user) },
     },
     { name: 'votes', type: 'join', collection: opts.slugs.votes as CollectionSlug, on: 'item', admin: { allowCreate: false } },
+    ...catalogItemFields(opts),
   ]
   return {
     slug: opts.slugs.items,

@@ -14,8 +14,11 @@ export type RoadmapNoticeField = {
 /** A notice that matched an item: shown to voters, optionally asking them to confirm first. */
 export type RoadmapNotice = { id: string; message: string; confirm: boolean }
 
+/** How catalog entries are labeled, from their stage and audience. */
+export type CatalogStatus = 'available' | 'members' | 'in-progress' | 'planned'
+
 export type RoadmapPluginOptions = {
-  slugs?: { items?: string; votes?: string; notices?: string }
+  slugs?: { items?: string; votes?: string; notices?: string; categories?: string }
   /** The auth collection whose accounts vote. Default 'users'. */
   usersSlug?: string
   /** Separate roadmaps, e.g. features and species. Default: one board, "features". */
@@ -76,16 +79,34 @@ export type RoadmapPluginOptions = {
    * values (`matchingNotices`). No fields: no notices collection.
    */
   notices?: { fields: RoadmapNoticeField[] }
+  /**
+   * A features catalog built from the roadmap: categories (a collection) are its
+   * sections, a board's items its entries (with details, links and an audience),
+   * and each entry's label comes from its stage. Render it with `getCatalog()`, so
+   * the catalog never drifts from the roadmap.
+   */
+  catalog?: {
+    /** Boards whose items are catalog entries. Default ['features']. */
+    boards?: string[]
+    /** Stages shown as available (or "members" for members-only entries). Default ['released']. */
+    availableStages?: string[]
+    /** Stages shown as in progress. Default ['in-progress']. */
+    progressStages?: string[]
+    /** Stages left out of the catalog. Default ['declined']. */
+    hiddenStages?: string[]
+  }
   overrides?: {
     items?: (collection: CollectionConfig) => CollectionConfig
     votes?: (collection: CollectionConfig) => CollectionConfig
     notices?: (collection: CollectionConfig) => CollectionConfig
+    categories?: (collection: CollectionConfig) => CollectionConfig
   }
 }
 
 export type ResolvedRoadmapOptions = Required<Pick<RoadmapPluginOptions, 'usersSlug' | 'boards' | 'stages'>> &
   Pick<RoadmapPluginOptions, 'subject' | 'scopeField' | 'allocation'> & {
-    slugs: { items: string; votes: string; notices: string }
+    slugs: { items: string; votes: string; notices: string; categories: string }
     notices: { fields: RoadmapNoticeField[] }
+    catalog?: { boards: string[]; availableStages: string[]; progressStages: string[]; hiddenStages: string[] }
     access: { manage: Access; vote: Access }
   }

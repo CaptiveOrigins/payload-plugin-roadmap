@@ -9,6 +9,7 @@ A public roadmap with voting for [Payload](https://payloadcms.com) 3.
 - **Extra votes** (optional): on top of the one free vote per item, users can place votes they've earned (from gifts, points, a membership…) anywhere: several on one item or spread across many. Your app says how many each user has earned; placed votes are spent at once, can be locked for a set time, and rankings show people and votes separately.
 - **Merging.** Editors combine similar items with "Merge into": votes move over (one free vote per person), children follow, and later requests for the old item land on the new one.
 - **Release stages** (optional): a stage such as "not planned" frees placed votes at once; `releasedVotes` lists them so you can ask each voter to move them (`withdrawVotes`) or keep them (`keepVotes`).
+- **Features catalog** (optional): a board's items double as a catalog of what your product does. Categories become its sections; each entry gets details, links and an audience, and is labeled from its stage (Available, Members, In progress, Planned). `getCatalog()` returns it ready to render, so the catalog never drifts from the roadmap.
 - **Boards** keep separate roadmaps (e.g. features and species) in one pair of collections.
 - **Scopes.** With `scopeField` (e.g. `tenant` from the multi-tenant plugin) each site has its own roadmap.
 
@@ -56,7 +57,7 @@ Add the plugin before plugins that wrap collections it creates (e.g. list `roadm
 
 | Option | Default | |
 |---|---|---|
-| `slugs` | `{ items: 'roadmap-items', votes: 'roadmap-votes', notices: 'roadmap-notices' }` | Collection slugs |
+| `slugs` | `{ items: 'roadmap-items', votes: 'roadmap-votes', notices: 'roadmap-notices', categories: 'roadmap-categories' }` | Collection slugs |
 | `usersSlug` | `'users'` | Auth collection whose accounts vote |
 | `boards` | one board, `features` | Separate roadmaps |
 | `stages` | requested, under-review, planned, in-progress, released, declined | First stage is where requests start |
@@ -66,7 +67,8 @@ Add the plugin before plugins that wrap collections it creates (e.g. list `roadm
 | `access.vote` | any signed-in user | Who may vote through the API (always as themselves) |
 | `allocation` | off | `{ earned: ({ payload, user, scope }) => Promise<number>, lockDays?, boards?, releaseStages? }`: extra votes |
 | `notices` | off | `{ fields: [{ name, label, options, boards? }] }`: conditional notices (below) |
-| `overrides.items` / `.votes` / `.notices` | | `(collection) => collection` |
+| `catalog` | off | `{ boards?, availableStages?, progressStages?, hiddenStages? }`: features catalog (below) |
+| `overrides.items` / `.votes` / `.notices` / `.categories` | | `(collection) => collection` |
 
 The public reads items that are not `hidden`. Voters read and delete only their own votes.
 
@@ -87,6 +89,27 @@ const notices = matchingNotices(rules, { cites: taxon.citesAppendices })  // [{ 
 ```
 
 Without fields there is no notices collection.
+
+### Features catalog
+
+```ts
+roadmapPlugin({ catalog: {} }) // board `features`; released = Available, in-progress = In progress
+```
+
+Adds a `roadmap-categories` collection (title, slug, summary, intro, order) and, on catalog
+boards, `category`, `audience` (everyone or members), `order`, `details` and `links` to items.
+Render it on a page:
+
+```ts
+import { getCatalog } from '@captiveorigins/payload-plugin-roadmap'
+
+const sections = await getCatalog(payload, { scope: tenantId })
+// [{ slug, title, summary, intro, entries: [{ slug, title, summary, status, details, links, votes }] }]
+```
+
+Entries without a category, hidden items and "not planned" items are left out. Members
+suggest new entries through the board as usual; once an editor gives one a category it appears
+in the catalog as Planned.
 
 ## Server helpers
 

@@ -114,3 +114,44 @@ describe('notices', () => {
     expect(matchingNotices(rules, {})).toEqual([])
   })
 })
+
+describe('catalog', () => {
+  it('adds categories and catalog fields only when enabled, and labels entries from their stage', async () => {
+    expect(bySlug(configure())['roadmap-categories']).toBeUndefined()
+    const config = configure({ catalog: {}, slugs: { categories: 'feature-categories' } })
+    const { 'feature-categories': categories, 'roadmap-items': items } = bySlug(config)
+    expect(categories!.indexes).toEqual([{ fields: ['slug'], unique: true }])
+    const names = items!.fields.map((f) => ('name' in f ? f.name : null))
+    expect(names).toEqual(expect.arrayContaining(['category', 'audience', 'order', 'details', 'links']))
+    const { catalogStatus } = await import('../src')
+    const opts = config.custom.roadmap
+    expect(['released', 'in-progress', 'planned', 'requested', 'declined'].map((s) => catalogStatus(opts, s))).toEqual(['available', 'in-progress', 'planned', 'planned', null])
+    expect(catalogStatus(opts, 'released', 'members')).toBe('members')
+  })
+
+  it('groups visible entries by category, in order', async () => {
+    const { getCatalog } = await import('../src')
+    const calls: { collection: string; where: unknown }[] = []
+    const payload = {
+      config: configure({ catalog: {}, scopeField: 'tenant' }),
+      find: async (args: { collection: string; where: unknown }) => {
+        calls.push(args)
+        return args.collection === 'roadmap-categories'
+          ? { docs: [{ id: 'c1', slug: 'climate', title: 'Climate' }, { id: 'c2', slug: 'empty', title: 'Empty' }] }
+          : {
+              docs: [
+                { id: 'a', slug: 'score', title: 'Score', stage: 'released', category: 'c1', details: [{ text: 'd' }], voteCount: 2 },
+                { id: 'b', slug: 'gone', title: 'Gone', stage: 'declined', category: 'c1' },
+                { id: 'c', slug: 'indoor', title: 'Indoor', stage: 'planned', category: { id: 'c1' } },
+              ],
+            }
+      },
+    }
+    const sections = await getCatalog(payload as never, { scope: 't1' })
+    expect(sections.map((s) => [s.slug, s.entries.map((e) => `${e.slug}:${e.status}`)])).toEqual([
+      ['climate', ['score:available', 'indoor:planned']],
+      ['empty', []],
+    ])
+    expect(JSON.stringify(calls[1]!.where)).toContain('"tenant":{"equals":"t1"}')
+  })
+})
