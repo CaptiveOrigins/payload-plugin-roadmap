@@ -1,7 +1,11 @@
 {
   "name": "@captiveorigins/payload-plugin-roadmap",
   "version": "0.3.1",
-  "description": "Public roadmap and voting for Payload: items in curator-set stages, one vote per user per item, deduplicated requests by subject, parent grouping.",
+  "description": "Roadmaps for Payload: public roadmap and voting, with items in curator-set stages, one vote per person per item, deduplicated requests and parent grouping.",
+  "homepage": "https://github.com/mgilardi/payload-plugin-roadmap#readme",
+  "bugs": {
+    "url": "https://github.com/mgilardi/payload-plugin-roadmap/issues"
+  },
   "keywords": [
     "payload",
     "payload-plugin",
