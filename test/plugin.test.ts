@@ -162,3 +162,39 @@ describe('catalog', () => {
     ])
   })
 })
+
+describe('concurrent placements', () => {
+  it('lets one of two colliding placements through, never overspending', async () => {
+    // In-memory store shared by both calls; reads see every committed vote.
+    const placed: { id: string; weight: number }[] = []
+    let n = 0
+    const tick = () => new Promise((r) => setTimeout(r, 1))
+    const payload = {
+      config: configure({ allocation: { earned: async () => 2 } }),
+      findByID: async () => ({ id: 'i', board: 'species', stage: 'requested' }),
+      find: async () => {
+        await tick()
+        return { docs: [...placed] }
+      },
+      create: async (args: { data: { weight: number } }) => {
+        await tick()
+        const v = { id: `v${++n}`, weight: args.data.weight }
+        placed.push(v)
+        return v
+      },
+      delete: async (args: { id: string }) => {
+        await tick()
+        placed.splice(placed.findIndex((v) => v.id === args.id), 1)
+      },
+    }
+    for (let round = 0; round < 20; round++) {
+      placed.length = 0
+      const results = await Promise.allSettled([
+        allocateVotes(payload as never, { item: 'i', user: 'u', votes: 2 }),
+        allocateVotes(payload as never, { item: 'i', user: 'u', votes: 2 }),
+      ])
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
+      expect(placed.reduce((s, v) => s + v.weight, 0)).toBe(2)
+    }
+  })
+})

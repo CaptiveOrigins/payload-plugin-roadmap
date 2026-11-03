@@ -162,9 +162,11 @@ export async function voteBalance(payload: Payload, args: { user: string; scope?
 /**
  * Place `votes` extra votes on an item, spent from the balance at once. The
  * balance is checked again after saving, so two placements at the same moment
- * cannot overspend: the later one is undone.
+ * cannot overspend: an overspending placement is undone. When two collide, both
+ * may back off; each then retries after a short random pause (up to `attempts`),
+ * so one of them goes through and the other gets an honest "not enough votes".
  */
-export async function allocateVotes(payload: Payload, args: { item: string; user: string; votes: number; scope?: string }) {
+export async function allocateVotes(payload: Payload, args: { item: string; user: string; votes: number; scope?: string }, { attempts = 3 }: { attempts?: number } = {}) {
   const opts = optionsOf(payload)
   const votes = Math.floor(Number(args.votes))
   if (!opts.allocation) throw new RoadmapError('Extra votes are not enabled.')
@@ -173,24 +175,26 @@ export async function allocateVotes(payload: Payload, args: { item: string; user
   if (!item || item.hidden) throw new RoadmapError('That roadmap item is not open for votes.')
   if (opts.allocation.boards && !opts.allocation.boards.includes(item.board)) throw new RoadmapError('Extra votes can’t be placed on this roadmap.')
   if (releases(opts, item.stage)) throw new RoadmapError('This item is not planned, so it can’t take extra votes.')
-  if ((await voteBalance(payload, args)).available < votes) throw new RoadmapError('You don’t have that many votes available.')
-  const vote = (await payload.create({
-    collection: opts.slugs.votes as CollectionSlug,
-    data: {
-      item: args.item,
-      user: args.user,
-      ballot: `placed:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`,
-      weight: votes,
-    } as never,
-    overrideAccess: true,
-    disableTransaction: true,
-  })) as { id: string }
-  const after = await voteBalance(payload, args)
-  if (after.spent > after.earned) {
+  for (let attempt = 1; ; attempt++) {
+    if ((await voteBalance(payload, args)).available < votes) throw new RoadmapError('You don’t have that many votes available.')
+    const vote = (await payload.create({
+      collection: opts.slugs.votes as CollectionSlug,
+      data: {
+        item: args.item,
+        user: args.user,
+        ballot: `placed:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`,
+        weight: votes,
+      } as never,
+      overrideAccess: true,
+      disableTransaction: true,
+    })) as { id: string }
+    const after = await voteBalance(payload, args)
+    if (after.spent <= after.earned) return vote
     await payload.delete({ collection: opts.slugs.votes as CollectionSlug, id: vote.id, overrideAccess: true })
-    throw new RoadmapError('You don’t have that many votes available.')
+    if (attempt >= attempts) throw new RoadmapError('You don’t have that many votes available.')
+    // Collided with another placement: pause a random moment so the two don't retry in step.
+    await new Promise((resolve) => setTimeout(resolve, 25 + Math.random() * 150))
   }
-  return vote
 }
 
 /**
