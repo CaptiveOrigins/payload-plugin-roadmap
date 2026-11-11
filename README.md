@@ -111,6 +111,17 @@ Entries without a category, hidden items and "not planned" items are left out. M
 suggest new entries through the board as usual; once an editor gives one a category it appears
 in the catalog as Planned.
 
+**Docs for every entry.** With `catalog: { docs: true }` (or `{ docs: { name } }`), the catalog
+feeds a docs plugin such as `@captiveorigins/payload-plugin-docs`, with no import either way:
+
+- it registers itself at `config.custom.docsSources`, so the docs plugin's nightly sync reads every visible entry;
+- after an entry changes, it calls the docs plugin's `onFeatureChange` when that's there, so the page follows: made, marked out of date, or archived when the entry is hidden, declined, merged or deleted.
+
+Without the docs plugin it does nothing. A failure there never fails the edit: it's logged, and
+the nightly sync catches up. Only the public catalog's words go across (title, summary, details,
+site-path links, stage and section). The catalog isn't split by site for docs.
+
+
 ## Server helpers
 
 For server actions and endpoints that have already checked the user and scope (they run with `overrideAccess`):

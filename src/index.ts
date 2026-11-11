@@ -2,6 +2,7 @@ import type { Plugin } from 'payload'
 
 import { itemsCollection, votesCollection } from './collections'
 import { categoriesCollection } from './catalog'
+import { docsAfterChange, docsAfterDelete, docsFeatures } from './docs'
 import { noticesCollection } from './notices'
 import type { ResolvedRoadmapOptions, RoadmapPluginOptions } from './types'
 
@@ -30,6 +31,7 @@ export {
 } from './api'
 export type { RoadmapItemDoc } from './api'
 export { catalogStatus, getCatalog } from './catalog'
+export { docsFeatures, type DocsFeature } from './docs'
 export type { CatalogEntry, CatalogSection } from './catalog'
 
 export const DEFAULT_STAGES = [
@@ -56,6 +58,7 @@ const resolve = (o: RoadmapPluginOptions): ResolvedRoadmapOptions => ({
         availableStages: o.catalog.availableStages ?? ['released'],
         progressStages: o.catalog.progressStages ?? ['in-progress'],
         hiddenStages: o.catalog.hiddenStages ?? ['declined'],
+        ...(o.catalog.docs ? { docs: { name: (typeof o.catalog.docs === 'object' && o.catalog.docs.name) || 'roadmap-catalog' } } : {}),
       }
     : undefined,
   access: {
@@ -78,9 +81,16 @@ export const roadmapPlugin =
     const votes = (options.overrides?.votes ?? ((c) => c))(votesCollection(opts))
     const notices = opts.notices.fields.length ? [(options.overrides?.notices ?? ((c) => c))(noticesCollection(opts))] : []
     const categories = opts.catalog ? [(options.overrides?.categories ?? ((c) => c))(categoriesCollection(opts))] : []
+    const docs = opts.catalog?.docs
+    if (docs) items.hooks = { ...items.hooks, afterChange: [...(items.hooks?.afterChange ?? []), docsAfterChange], afterDelete: [...(items.hooks?.afterDelete ?? []), docsAfterDelete] }
     return {
       ...config,
       collections: [...(config.collections ?? []), items, votes, ...notices, ...categories],
-      custom: { ...config.custom, roadmap: opts },
+      custom: {
+        ...config.custom,
+        roadmap: opts,
+        // A docs plugin reads this when it runs, in any plugin order: no import either way.
+        ...(docs ? { docsSources: [...((config.custom?.docsSources as unknown[]) ?? []), { name: docs.name, list: async ({ payload }: { payload: Parameters<typeof docsFeatures>[0] }) => docsFeatures(payload) }] } : {}),
+      },
     }
   }

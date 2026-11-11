@@ -94,6 +94,11 @@ export type RoadmapPluginOptions = {
     progressStages?: string[]
     /** Stages left out of the catalog. Default ['declined']. */
     hiddenStages?: string[]
+    /**
+     * Feed the catalog to a docs plugin (such as @captiveorigins/payload-plugin-docs) with no import either way:
+     * the catalog registers as a feature source and tells it when an entry changes. Default off.
+     */
+    docs?: boolean | { name?: string }
   }
   overrides?: {
     items?: (collection: CollectionConfig) => CollectionConfig
@@ -107,6 +112,6 @@ export type ResolvedRoadmapOptions = Required<Pick<RoadmapPluginOptions, 'usersS
   Pick<RoadmapPluginOptions, 'subject' | 'scopeField' | 'allocation'> & {
     slugs: { items: string; votes: string; notices: string; categories: string }
     notices: { fields: RoadmapNoticeField[] }
-    catalog?: { boards: string[]; availableStages: string[]; progressStages: string[]; hiddenStages: string[] }
+    catalog?: { boards: string[]; availableStages: string[]; progressStages: string[]; hiddenStages: string[]; docs?: { name: string } }
     access: { manage: Access; vote: Access }
   }

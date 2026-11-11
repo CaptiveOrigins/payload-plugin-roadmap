@@ -163,6 +163,65 @@ describe('catalog', () => {
   })
 })
 
+describe('docs feature source', () => {
+  const mockPayload = (opts: object, onFeatureChange?: (p: unknown, a: unknown) => Promise<unknown>) => {
+    const config = configure(opts) as Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
+    if (onFeatureChange) config.custom.docs = { onFeatureChange }
+    return {
+      config,
+      logger: { error: () => undefined },
+      find: async (args: { collection: string }) =>
+        args.collection === 'roadmap-categories'
+          ? { docs: [{ id: 'c1', slug: 'climate', title: 'Climate' }] }
+          : {
+              docs: [
+                { id: 'a', board: 'features', title: 'Score', summary: 'S', stage: 'released', category: 'c1', details: [{ text: 'd1' }], links: [{ href: '/score' }, { href: 'https://x.example' }] },
+                { id: 'b', board: 'features', title: 'Gone', stage: 'declined', category: 'c1' },
+                { id: 'c', board: 'features', title: 'Members', stage: 'released', audience: 'members', category: 'c1' },
+                { id: 'd', board: 'features', title: 'Merged', stage: 'released', category: 'c1', mergedInto: 'a' },
+              ],
+            },
+      findByID: async () => ({ id: 'c1', slug: 'climate', title: 'Climate' }),
+    }
+  }
+
+  it('registers nothing unless asked', () => {
+    const config = configure({ catalog: {} }) as Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
+    expect(config.custom.docsSources).toBeUndefined()
+    expect(bySlug(config as never)['roadmap-items']!.hooks?.afterDelete?.length ?? 0).toBe(bySlug(configure() as never)['roadmap-items']!.hooks?.afterDelete?.length ?? 0)
+  })
+
+  it('registers a source and maps visible catalog entries to features, with a version that follows their words', async () => {
+    const payload = mockPayload({ catalog: { docs: { name: 'catalog' } } })
+    const [source] = payload.config.custom.docsSources as { name: string; list: (a: unknown) => Promise<Record<string, any>[]> }[] // eslint-disable-line @typescript-eslint/no-explicit-any
+    expect(source!.name).toBe('catalog')
+    const features = await source!.list({ payload })
+    expect(features.map((f) => [f.id, f.stage, f.section.key])).toEqual([['a', 'available', 'climate'], ['c', 'members', 'climate']])
+    expect(features[0]).toMatchObject({ title: 'Score', summary: 'S', details: 'd1', links: ['/score'] })
+    expect(features[0]!.version).toMatch(/^[0-9a-f]{16}$/)
+  })
+
+  it('tells the docs plugin when an entry changes or goes, and never fails the edit', async () => {
+    const calls: Record<string, any>[] = [] // eslint-disable-line @typescript-eslint/no-explicit-any
+    const payload = mockPayload({ catalog: { docs: true } }, async (_p, a) => void calls.push(a as never))
+    const items = bySlug(payload.config as never)['roadmap-items']!
+    const after = items.hooks!.afterChange!.at(-1)!
+    const del = items.hooks!.afterDelete!.at(-1)!
+    const req = { payload } as never
+    await after({ doc: { id: 'a', board: 'features', title: 'Score', stage: 'released', category: 'c1' }, req } as never)
+    await after({ doc: { id: 'b', board: 'features', title: 'Gone', stage: 'declined', category: 'c1' }, req } as never)
+    await del({ doc: { id: 'c' }, req } as never)
+    expect(calls.map((c) => [c.source, c.feature?.id ?? null, c.removedId ?? null])).toEqual([
+      ['roadmap-catalog', 'a', null],
+      ['roadmap-catalog', null, 'b'],
+      ['roadmap-catalog', null, 'c'],
+    ])
+    const failing = mockPayload({ catalog: { docs: true } }, async () => { throw new Error('made-up') })
+    const hook = bySlug(failing.config as never)['roadmap-items']!.hooks!.afterChange!.at(-1)!
+    await expect(hook({ doc: { id: 'a', board: 'features', title: 'x', stage: 'released', category: 'c1' }, req: { payload: failing } } as never)).resolves.toBeTruthy()
+  })
+})
+
 describe('concurrent placements', () => {
   it('lets one of two colliding placements through, never overspending', async () => {
     // In-memory store shared by both calls; reads see every committed vote.
