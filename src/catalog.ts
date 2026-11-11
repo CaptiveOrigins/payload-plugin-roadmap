@@ -19,10 +19,13 @@ export const categoriesCollection = (opts: ResolvedRoadmapOptions): CollectionCo
   admin: { group: 'Roadmap', useAsTitle: 'title', defaultColumns: ['title', 'order', 'updatedAt'], description: 'Sections of the features catalog.' },
   access: { read: () => true, create: opts.access.manage, update: opts.access.manage, delete: opts.access.manage },
   defaultPopulate: { title: true, slug: true },
-  indexes: [{ fields: [...(opts.scopeField ? [opts.scopeField] : []), 'slug'], unique: true }],
+  // One unique slug index. With a scopeField: `<scope>_1_slug_1`, unique per scope, beside the field's plain `slug_1`
+  // (as in 0.4.1, so scoped sites need no index migration). Without one: the field's own `slug_1`, unique (and sparse
+  // on MongoDB, as Payload makes it). A collection index on `slug` alone would ask for a second `slug_1`.
+  indexes: opts.scopeField ? [{ fields: [opts.scopeField, 'slug'], unique: true }] : [],
   fields: [
     { name: 'title', type: 'text', required: true },
-    { name: 'slug', type: 'text', index: true, admin: { position: 'sidebar', description: 'From the title if left empty.' } },
+    { name: 'slug', type: 'text', index: true, unique: !opts.scopeField, admin: { position: 'sidebar', description: 'From the title if left empty.' } },
     { name: 'summary', type: 'text', admin: { description: 'One line, for overview cards.' } },
     { name: 'intro', type: 'textarea', admin: { description: 'Opening paragraph of the section.' } },
     { name: 'order', type: 'number', defaultValue: 100, index: true, admin: { position: 'sidebar', description: 'Lower comes first.' } },

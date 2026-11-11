@@ -2,6 +2,16 @@
 
 Kept by this repo's owning session, per `~/Code/CLAUDE.md` "Test self-audits". Newest first.
 
+## 2026-11-11: catalog categories couldn't start without a `scopeField`
+
+Suite: 45 → 47 tests in 3 files. Real Payload on an in-memory MongoDB replica set, one database per site. Made-up categories only.
+
+- **Bug.** With the catalog on and no `scopeField`, the collection index on `slug` and the `slug` field's own `index: true` both asked for `slug_1`, one unique and one not. MongoDB refused the second ("An existing index has the same name"), so the site couldn't start. Found by a combo test in payload-plugin-docs. The new test reproduced it before the fix.
+- **Fix.** One unique slug index in each case. No `scopeField`: the field's own `slug_1`, unique and sparse, and no collection index. With a `scopeField`: unchanged from 0.4.1, `<scope>_1_slug_1` unique plus a plain `slug_1`, so scoped sites need no index migration.
+- **Tests.** No `scopeField`: the site starts, `slug_1` is the only slug index and is unique, and a duplicate slug (typed, or made from the title) is refused with "Value must be unique". With `scopeField: 'tenant'`: exactly those two indexes, one slug in two scopes saves, a duplicate within a scope is refused. The config test checks the collection index and field flags in both cases.
+- **Mutation checks.** 5 mutations, each restored byte for byte (SHA-256), all caught: the old code back, `unique` never set, the scoped index dropped, `unique` always set, the field's index turned off.
+- **Not tested.** Postgres and SQLite. An unscoped site on 0.3.0 to 0.4.1 that started without `ensureIndexes` may hold a plain `slug_1` from before; it would need dropping so the unique one can build. Not checked on a real site.
+
 ## 2026-11-11: the `slot` index on real MongoDB
 
 Suite: 41 → 45 tests in 3 files. `test/mongo.test.ts` runs real Payload on an in-memory MongoDB replica set (`mongodb-memory-server` 11.3.0 and `@payloadcms/db-mongodb` 3.92.1, exact-pinned devDependencies). Made-up example.com people and items.

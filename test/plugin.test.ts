@@ -120,7 +120,12 @@ describe('catalog', () => {
     expect(bySlug(configure())['roadmap-categories']).toBeUndefined()
     const config = configure({ catalog: {}, slugs: { categories: 'feature-categories' } })
     const { 'feature-categories': categories, 'roadmap-items': items } = bySlug(config)
-    expect(categories!.indexes).toEqual([{ fields: ['slug'], unique: true }])
+    // One unique slug index: the field's own without a scopeField, a compound one per scope with it.
+    expect(categories!.indexes).toEqual([])
+    expect(categories!.fields.find((f) => 'name' in f && f.name === 'slug')).toMatchObject({ index: true, unique: true })
+    const scoped = bySlug(configure({ catalog: {}, scopeField: 'tenant' }))['roadmap-categories']!
+    expect(scoped.indexes).toEqual([{ fields: ['tenant', 'slug'], unique: true }])
+    expect(scoped.fields.find((f) => 'name' in f && f.name === 'slug')).toMatchObject({ index: true, unique: false })
     const names = items!.fields.map((f) => ('name' in f ? f.name : null))
     expect(names).toEqual(expect.arrayContaining(['category', 'audience', 'order', 'details', 'links']))
     const { catalogStatus } = await import('../src')

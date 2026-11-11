@@ -145,3 +145,80 @@ describe('the slot index on real MongoDB', () => {
     expect(placed.map((v) => [v.slot, v.weight])).toEqual([[`${v3}::1`, 2]])
   })
 })
+
+// Catalog categories on real MongoDB: one unique slug index, global without a scopeField and per scope with one.
+// Each site is its own Payload on its own database. Made-up categories only.
+describe('the catalog category slug index on real MongoDB', () => {
+  const sites: Payload[] = []
+  const categories = (db: string) => client.db(db).collection('roadmap-categories')
+  /** Every index on categories that covers `slug`, as name, key and uniqueness, sorted by name. */
+  const slugIndexes = async (db: string) =>
+    (await categories(db).indexes())
+      .filter((i) => 'slug' in i.key)
+      .map((i) => ({ name: i.name, key: i.key, unique: i.unique === true }))
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)))
+
+  /** Starts a site with the catalog on, building every index the way a site's start does. */
+  const startSite = async (db: string, scopeField?: string) => {
+    // The plugin leaves the scope field to the host: add it to the roadmap's collections.
+    const addScope = (config: Parameters<NonNullable<Parameters<typeof buildConfig>[0]['plugins']>[number]>[0]) =>
+      scopeField
+        ? {
+            ...config,
+            collections: (config.collections ?? []).map((c) =>
+              c.slug.startsWith('roadmap-') ? { ...c, fields: [...c.fields, { name: scopeField, type: 'text' as const }] } : c,
+            ),
+          }
+        : config
+    const site = await getPayload({
+      key: db,
+      config: await buildConfig({
+        secret: 'test-secret-not-for-production',
+        telemetry: false,
+        typescript: { autoGenerate: false },
+        db: mongooseAdapter({ url: mongo.getUri(db), ensureIndexes: true }),
+        collections: [{ slug: 'users', auth: true, fields: [] }],
+        plugins: [roadmapPlugin({ catalog: {}, ...(scopeField ? { scopeField } : {}) }), addScope],
+      }),
+    })
+    sites.push(site)
+    const models = (site.db as unknown as { collections: Record<string, { ensureIndexes: () => Promise<unknown> }> }).collections
+    for (const m of Object.values(models)) await m.ensureIndexes()
+    return site
+  }
+  /** Payload's refusal when the unique index rejects a save (it names the index's first field). */
+  const notUnique = { name: 'ValidationError', data: { errors: [{ message: 'Value must be unique' }] } }
+  const category = (site: Payload, data: Doc) => site.create({ collection: 'roadmap-categories' as never, data: data as never, overrideAccess: true }) as Promise<Doc>
+
+  afterAll(async () => {
+    for (const site of sites) await site.destroy()
+  })
+
+  it('starts without a scopeField, with one unique slug index, and refuses a duplicate slug', async () => {
+    const db = 'roadmap-catalog-global'
+    const site = await startSite(db)
+    expect(await slugIndexes(db)).toEqual([{ name: 'slug_1', key: { slug: 1 }, unique: true }])
+    await category(site, { title: 'Made-up climate tools', slug: 'climate' })
+    await expect(category(site, { title: 'Another made-up section', slug: 'climate' })).rejects.toMatchObject(notUnique)
+    // A slug made from the title collides too.
+    await category(site, { title: 'Made-up Habitat' })
+    await expect(category(site, { title: 'Made-up Habitat' })).rejects.toMatchObject(notUnique)
+    expect(await categories(db).countDocuments({ slug: 'climate' })).toBe(1)
+    expect(await categories(db).countDocuments({ slug: 'made-up-habitat' })).toBe(1)
+  }, 120_000)
+
+  it('with a scopeField, allows one slug in two scopes and refuses a duplicate within a scope', async () => {
+    const db = 'roadmap-catalog-scoped'
+    const site = await startSite(db, 'tenant')
+    // Unchanged from 0.4.1, so a scoped site needs no index migration.
+    expect(await slugIndexes(db)).toEqual([
+      { name: 'slug_1', key: { slug: 1 }, unique: false },
+      { name: 'tenant_1_slug_1', key: { tenant: 1, slug: 1 }, unique: true },
+    ])
+    await category(site, { title: 'Made-up climate tools', slug: 'climate', tenant: 'site-a' })
+    await category(site, { title: 'Made-up climate tools', slug: 'climate', tenant: 'site-b' })
+    await expect(category(site, { title: 'Another made-up section', slug: 'climate', tenant: 'site-a' })).rejects.toMatchObject(notUnique)
+    expect(await categories(db).countDocuments({ slug: 'climate' })).toBe(2)
+    expect(await categories(db).countDocuments({ slug: 'climate', tenant: 'site-a' })).toBe(1)
+  }, 120_000)
+})
