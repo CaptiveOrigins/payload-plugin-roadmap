@@ -1,6 +1,6 @@
 {
   "name": "@captiveorigins/payload-plugin-roadmap",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Roadmaps for Payload: public roadmap and voting, with items in curator-set stages, one vote per person per item, deduplicated requests and parent grouping.",
   "homepage": "https://github.com/CaptiveOrigins/payload-plugin-roadmap#readme",
   "bugs": {
