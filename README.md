@@ -17,6 +17,18 @@ A public roadmap with voting for [Payload](https://payloadcms.com) 3.
 
 Built for [Captive Origins](https://captiveorigins.com)'s Species Roadmap.
 
+## On its own, and with others
+
+**On its own.** Roadmap needs an auth collection whose accounts vote (`users` by default). Subjects, extra votes, notices and the catalog are optional, and each reads your own collections or functions, not another plugin.
+
+**Works with:**
+
+- **Docs** (`@captiveorigins/payload-plugin-docs`): with `catalog: { docs: true }`, the catalog registers itself at `config.custom.docsSources` and calls Docs' `onFeatureChange` when an entry changes, so every feature gets a docs page. No import either way, and without Docs it does nothing. See [Features catalog](#features-catalog).
+- **Membership** (`@captiveorigins/payload-plugin-membership`): your `allocation.earned` function can count votes members have earned. There's no adapter for this. It's your own code.
+- **Multi-tenant** (`@payloadcms/plugin-multi-tenant`): list `roadmap-items` and `roadmap-votes` in it and set `scopeField: 'tenant'`, and each site has its own roadmap.
+
+**Family.** Roadmap is in the Patronage family, with Membership, Sponsors, Backing, Credits and Printify. Docs is in a different family (Library), so that pairing is "works with". The families are a working draft that may change.
+
 ## Install
 
 ```bash
