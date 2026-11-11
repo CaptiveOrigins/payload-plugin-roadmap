@@ -233,7 +233,9 @@ export const votesCollection = (opts: ResolvedRoadmapOptions): CollectionConfig 
       },
       {
         // Unique, so two placements that read the same balance can't both save. Not required:
-        // free votes and older placements have none (Mongo makes the index sparse).
+        // free votes and older placements have none. Mongo makes the index sparse, which skips a
+        // missing field but not a null, so the collection hook below leaves anything but a
+        // non-empty string unset.
         name: 'slot',
         type: 'text',
         unique: true,
@@ -281,6 +283,11 @@ export const votesCollection = (opts: ResolvedRoadmapOptions): CollectionConfig 
           })
           if (!item || (item as { hidden?: boolean }).hidden) throw new APIError('That roadmap item is not open for votes.', 400)
           if (opts.scopeField) data[opts.scopeField] = idOf((item as unknown as Record<string, unknown>)[opts.scopeField]) || undefined
+          return data
+        },
+        // Never store a null or empty slot: the sparse unique index would count it as a value.
+        ({ data }) => {
+          if (data && !(typeof data.slot === 'string' && data.slot)) delete data.slot
           return data
         },
       ],

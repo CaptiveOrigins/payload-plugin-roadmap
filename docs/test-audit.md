@@ -2,6 +2,16 @@
 
 Kept by this repo's owning session, per `~/Code/CLAUDE.md` "Test self-audits". Newest first.
 
+## 2026-11-11: the `slot` index on real MongoDB
+
+Suite: 41 → 45 tests in 3 files. `test/mongo.test.ts` runs real Payload on an in-memory MongoDB replica set (`mongodb-memory-server` 11.3.0 and `@payloadcms/db-mongodb` 3.92.1, exact-pinned devDependencies). Made-up example.com people and items.
+
+- **Index.** Builds as `{ slot: 1 }`, unique and sparse, on a collection that already holds 60 votes with no `slot`.
+- **Found and fixed.** A stored `null` counts in a sparse index, and Payload stored an explicit `slot: null` sent through the Local API: a second one failed with "Value must be unique". A field hook returning `undefined` didn't help. A last collection `beforeChange` hook now deletes any `slot` that isn't a non-empty string.
+- **Tests.** Curator votes, a voter's own free vote, `castVote`, server placements, curator and server edits, an edit to a vote with no `slot`, and a merge: no null or empty `slot` stored, only the two placements' own slots. Server and curator creates and edits sending `null` or `''` store nothing. Two placements held at a barrier: exactly one saves on the real index, the other is refused.
+- **Mutation checks.** All caught: the null-stripping hook removed, the hook stripping only `null` (an empty string survives), `unique` removed, no slot written. `castVote` sending `slot: null` now survives on purpose: the hook strips it.
+- **Stability.** The full suite passed 10 runs in 10.
+
 ## 2026-11-11: the colliding-placements flake was the code
 
 Suite: 39 → 41 tests in 2 files. Made-up data and the in-memory fake only.
