@@ -64,7 +64,7 @@ Add the plugin before plugins that wrap collections it creates (e.g. list `roadm
 | `subject` | none | `{ relationTo, filterOptions?, parentOf? }` |
 | `scopeField` | none | Field that partitions roadmaps (not added by the plugin) |
 | `access.manage` | nobody | Who edits items and sees every vote |
-| `access.vote` | any signed-in user | Who may vote through the API (always as themselves) |
+| `access.vote` | any signed-in user | Who may vote through the API. Only accounts of `usersSlug` can vote, always as themselves with weight 1; a vote that names another voter, a weight or a ballot is refused (403). Accounts from other auth collections never vote, see or delete votes unless `manage` lets them |
 | `allocation` | off | `{ earned: ({ payload, user, scope }) => Promise<number>, lockDays?, boards?, releaseStages? }`: extra votes |
 | `notices` | off | `{ fields: [{ name, label, options, boards? }] }`: conditional notices (below) |
 | `catalog` | off | `{ boards?, availableStages?, progressStages?, hiddenStages? }`: features catalog (below) |

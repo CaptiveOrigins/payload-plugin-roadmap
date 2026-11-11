@@ -4,13 +4,16 @@ import { FREE_BALLOT, idOf, itemKey, mergeItems, recountVotes, releases, slugify
 import { catalogItemFields } from './catalog'
 import type { ResolvedRoadmapOptions } from './types'
 
-/** manage, else the signed-in user's own records (by `field`). */
+/**
+ * manage, else the signed-in voter's own records (by `field`). Only accounts
+ * of `usersSlug` own records: ids from another auth collection can collide.
+ */
 const manageOrOwn =
-  (manage: Access, field: string): Access =>
+  (manage: Access, field: string, usersSlug: string): Access =>
   async (args) => {
     const managed = await manage(args)
     if (managed === true) return true
-    if (!args.req.user) return managed
+    if (!args.req.user || args.req.user.collection !== usersSlug) return managed
     const own: Where = { [field]: { equals: args.req.user.id } }
     return managed ? { or: [managed as Where, own] } : own
   }
@@ -211,8 +214,8 @@ export const votesCollection = (opts: ResolvedRoadmapOptions): CollectionConfig 
     admin: { group: 'Roadmap', defaultColumns: ['item', 'user', 'weight', 'createdAt'] },
     access: {
       create: vote,
-      read: manageOrOwn(manage, 'user'),
-      delete: manageOrOwn(manage, 'user'),
+      read: manageOrOwn(manage, 'user', opts.usersSlug),
+      delete: manageOrOwn(manage, 'user', opts.usersSlug),
       update: manage,
     },
     // One free vote per user per item; each placement of extra votes has its own ballot.
@@ -242,7 +245,19 @@ export const votesCollection = (opts: ResolvedRoadmapOptions): CollectionConfig 
         async ({ data, operation, req }) => {
           if (operation !== 'create') return data
           // API voters cast their own free vote; extra votes go through allocateVotes.
-          if (req.user && req.user.collection === opts.usersSlug && (await manage({ req })) !== true) {
+          // Curators and the server's own Local API calls (no user) may set any voter.
+          // Everyone else must be a signed-in account of usersSlug, voting as itself,
+          // and may not choose the voter, ballot or weight.
+          const curator = req.user != null && (await manage({ req })) === true
+          if (!curator && (req.user || req.payloadAPI !== 'local')) {
+            if (!req.user || req.user.collection !== opts.usersSlug) throw new APIError('Only signed-in voters can vote.', 403)
+            const sent = (key: string) => data[key] !== undefined && data[key] !== null
+            if (
+              (sent('user') && idOf(data.user) !== String(req.user.id)) ||
+              (sent('weight') && data.weight !== 1) ||
+              (sent('ballot') && data.ballot !== FREE_BALLOT)
+            )
+              throw new APIError('Votes are cast as yourself, one at a time; extra votes are placed separately.', 403)
             data.user = req.user.id
             data.ballot = FREE_BALLOT
             data.weight = 1

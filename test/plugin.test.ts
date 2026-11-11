@@ -25,7 +25,7 @@ describe('config', () => {
     expect(await items!.access!.read!({ req: req() } as never)).toEqual({ hidden: { not_equals: true } })
     expect(await votes!.access!.create!({ req: req() } as never)).toBe(false)
     expect(await votes!.access!.create!({ req: req({ id: 'u1' }) } as never)).toBe(true)
-    expect(await votes!.access!.read!({ req: req({ id: 'u1' }) } as never)).toEqual({ user: { equals: 'u1' } })
+    expect(await votes!.access!.read!({ req: req({ id: 'u1', collection: 'users' }) } as never)).toEqual({ user: { equals: 'u1' } })
   })
 
   it('applies overrides', () => {

@@ -90,6 +90,12 @@ describe('access', () => {
     expect(await votes!.access!.update!(as(voter))).toBe(false)
   })
 
+  it('never shows or deletes votes for an account from another auth collection with the same id', async () => {
+    const admin = { id: 'u1', collection: 'admins' }
+    expect(await votes!.access!.read!(as(admin))).toBe(false)
+    expect(await votes!.access!.delete!(as(admin))).toBe(false)
+  })
+
   it('lets curators see and remove every vote', async () => {
     const { 'roadmap-votes': managed } = bySlug(configure({ access: { manage: ({ req }) => Boolean(req.user?.id === 'curator') } }))
     expect(await managed!.access!.read!(as({ id: 'curator', collection: 'users' }))).toBe(true)
@@ -127,8 +133,46 @@ describe('casting votes through the API', () => {
     hook({ data, operation: 'create', req: { user, payload: { findByID: async () => item } } } as never)
 
   it('always votes as the signed-in voter, once, with weight one', async () => {
-    const out = (await run({ item: 'i1', user: 'someone-else', ballot: 'placed:x', weight: 50 }, voter, { id: 'i1', tenant: 't1' })) as Record<string, unknown>
-    expect(out).toMatchObject({ user: 'u1', ballot: FREE_BALLOT, weight: 1, tenant: 't1' })
+    for (const data of [{ item: 'i1' }, { item: 'i1', user: 'u1', ballot: FREE_BALLOT, weight: 1 }, { item: 'i1', user: { id: 'u1' } }]) {
+      const out = (await run(data, voter, { id: 'i1', tenant: 't1' })) as Record<string, unknown>
+      expect(out).toMatchObject({ user: 'u1', ballot: FREE_BALLOT, weight: 1, tenant: 't1' })
+    }
+  })
+
+  it('refuses a voter, weight or ballot sent by the client', async () => {
+    for (const data of [{ user: 'someone-else' }, { weight: 50 }, { weight: 0 }, { ballot: 'placed:x' }, { user: 'someone-else', ballot: 'placed:x', weight: 50 }])
+      await expect(run({ item: 'i1', ...data }, voter, { id: 'i1', tenant: 't1' })).rejects.toMatchObject({ status: 403 })
+  })
+
+  it('refuses accounts from any other auth collection, even one that passes the vote access', async () => {
+    const admin = { id: 'u1', collection: 'admins' }
+    // The default vote access lets in any signed-in account.
+    expect(await bySlug(config)['roadmap-votes']!.access!.create!({ req: { user: admin } } as never)).toBe(true)
+    for (const data of [{ item: 'i1' }, { item: 'i1', user: 'u2', weight: 50 }, { item: 'i1', user: 'u1', weight: 1 }])
+      await expect(run(data, admin, { id: 'i1', tenant: 't1' })).rejects.toMatchObject({ status: 403 })
+  })
+
+  it('refuses signed-out API votes, even when the app opens vote access to everyone', async () => {
+    const open = bySlug(configure({ access: { vote: () => true } }))['roadmap-votes']!.hooks!.beforeChange![0]!
+    await expect(
+      open({ data: { item: 'i1', user: 'u2', weight: 50 }, operation: 'create', req: { user: null, payloadAPI: 'REST', payload: { findByID: async () => ({ id: 'i1' }) } } } as never),
+    ).rejects.toMatchObject({ status: 403 })
+  })
+
+  it('leaves server-side votes (local API, no user) and curators alone', async () => {
+    const local = (await hook({
+      data: { item: 'i1', user: 'u2', ballot: 'placed:abc', weight: 3 },
+      operation: 'create',
+      req: { user: null, payloadAPI: 'local', payload: { findByID: async () => ({ id: 'i1' }) } },
+    } as never)) as Record<string, unknown>
+    expect(local).toMatchObject({ user: 'u2', ballot: 'placed:abc', weight: 3 })
+    const curated = bySlug(configure({ access: { manage: ({ req }) => req.user?.id === 'curator' } }))['roadmap-votes']!.hooks!.beforeChange![0]!
+    const out = (await curated({
+      data: { item: 'i1', user: 'u2', weight: 2 },
+      operation: 'create',
+      req: { user: { id: 'curator', collection: 'admins' }, payload: { findByID: async () => ({ id: 'i1' }) } },
+    } as never)) as Record<string, unknown>
+    expect(out).toMatchObject({ user: 'u2', weight: 2 })
   })
 
   it('refuses votes on hidden or missing items', async () => {

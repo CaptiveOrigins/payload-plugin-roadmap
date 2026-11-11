@@ -2,6 +2,23 @@
 
 Kept by this repo's owning session, per `~/Code/CLAUDE.md` "Test self-audits". Newest first.
 
+## 2026-11-10: the lead's fixes after the first audit
+
+Suite: 34 → 39 tests in 2 files. Made-up data and the in-memory fake only.
+
+**Confirmed and fixed: votes from other auth collections.** The vote hook forced the voter, ballot and weight only when `req.user.collection` was `usersSlug`. The default `access.vote` lets in any signed-in account, so an account from another auth collection (an `admins` collection, say) that wasn't a curator could create a vote for any user with any weight. The new test "refuses accounts from any other auth collection…" failed before the fix.
+
+- Through the API, only a signed-in `usersSlug` account can vote, and only as itself with the free ballot and weight 1. Any other account, or a signed-out request when the app opens `access.vote` to everyone, gets a 403.
+- A vote that names another voter, a weight other than 1 or a ballot other than `free` is now refused with a 403 instead of being quietly rewritten. Sending your own id, weight 1 or `free` still works.
+- Curators (`access.manage`) and the plugin's own Local API calls without a user (`castVote`, `allocateVotes`) are unchanged.
+- Found on the way, same cause: read and delete on votes matched "own" by id alone, so an account from another auth collection with a colliding id (common with numeric ids) could see and delete that voter's votes. "Own" now needs a `usersSlug` account.
+
+Tests (`access-and-votes.test.ts`): "always votes as the signed-in voter…" (now also with own id sent), "refuses a voter, weight or ballot sent by the client", "refuses accounts from any other auth collection…", "refuses signed-out API votes…", "leaves server-side votes … and curators alone", "never shows or deletes votes for an account from another auth collection with the same id". The config test's user now carries `collection: 'users'`, as real Payload users do.
+
+Mutation check: dropping the collection check from the hook fails 1 test; rewriting instead of refusing fails 1; putting the old condition back fails 2; dropping the collection check from read and delete fails 1. Each file was restored byte for byte.
+
+Still open: "lets one of two colliding placements through, never overspending" depends on timers and failed once in about eight runs here, unrelated to this change.
+
 ## 2026-11-10: first audit
 
 Suite before: 16 tests in 1 file. After: 34 tests in 2 files. All tests use made-up data and a small in-memory fake of Payload; none use a database.
