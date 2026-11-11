@@ -154,6 +154,8 @@ await mergeItems(payload, { from, into })                        // same as sett
 
 Votes and new items are inserted outside a transaction so that concurrent duplicates fail cleanly on the unique index and resolve to the existing record.
 
+Each placement of extra votes takes the voter's next numbered slot, stored in the votes' `slot` field under a unique index. Of two placements that read the same balance, only one saves; the other reads again and either places on what's left or is refused. After saving, the balance is checked once more, and a placement that would overspend is undone. On Postgres or SQLite, the new `slot` column needs a migration.
+
 ## License
 
 MIT

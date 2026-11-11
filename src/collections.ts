@@ -231,6 +231,14 @@ export const votesCollection = (opts: ResolvedRoadmapOptions): CollectionConfig 
         index: true,
         admin: { readOnly: true, description: '"free" for the one free vote; extra votes placed from a balance have their own.' },
       },
+      {
+        // Unique, so two placements that read the same balance can't both save. Not required:
+        // free votes and older placements have none (Mongo makes the index sparse).
+        name: 'slot',
+        type: 'text',
+        unique: true,
+        admin: { readOnly: true, hidden: true },
+      },
       { name: 'weight', type: 'number', required: true, defaultValue: 1, min: 1, admin: { readOnly: true } },
       { name: 'note', type: 'textarea', maxLength: 1000, admin: { description: 'Why the voter wants this (curators only).' } },
       {
@@ -255,7 +263,8 @@ export const votesCollection = (opts: ResolvedRoadmapOptions): CollectionConfig 
             if (
               (sent('user') && idOf(data.user) !== String(req.user.id)) ||
               (sent('weight') && data.weight !== 1) ||
-              (sent('ballot') && data.ballot !== FREE_BALLOT)
+              (sent('ballot') && data.ballot !== FREE_BALLOT) ||
+              sent('slot')
             )
               throw new APIError('Votes are cast as yourself, one at a time; extra votes are placed separately.', 403)
             data.user = req.user.id

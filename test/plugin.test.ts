@@ -223,37 +223,87 @@ describe('docs feature source', () => {
 })
 
 describe('concurrent placements', () => {
-  it('lets one of two colliding placements through, never overspending', async () => {
-    // In-memory store shared by both calls; reads see every committed vote.
-    const placed: { id: string; weight: number }[] = []
+  type Vote = Record<string, any> // eslint-disable-line @typescript-eslint/no-explicit-any
+  type Gate = { before?: () => Promise<unknown>; after?: () => Promise<unknown> }
+  /** Resolves for everyone once `count` callers have arrived: fixes the ordering without timers. */
+  const barrier = (count: number) => {
+    let arrived = 0
+    let open!: () => void
+    const all = new Promise<void>((r) => (open = r))
+    return () => {
+      if (++arrived === count) open()
+      return all
+    }
+  }
+  /**
+   * An in-memory votes store that enforces the votes collection's own unique fields, as the
+   * database's unique index does (with the Mongo adapter's error), and runs each `find` through
+   * the next gate: `before` holds it before reading, `after` holds it after reading.
+   */
+  const store = (earned: number, initial: Vote[] = []) => {
+    const config = configure({ allocation: { earned: async () => earned } })
+    const unique = bySlug(config)['roadmap-votes']!.fields.flatMap((f) => ('unique' in f && f.unique && 'name' in f ? [f.name] : []))
+    const placed: Vote[] = initial.map((v) => ({ ...v }))
+    const gates: Gate[] = []
     let n = 0
-    const tick = () => new Promise((r) => setTimeout(r, 1))
     const payload = {
-      config: configure({ allocation: { earned: async () => 2 } }),
+      config,
       findByID: async () => ({ id: 'i', board: 'species', stage: 'requested' }),
       find: async () => {
-        await tick()
-        return { docs: [...placed] }
+        const gate = gates.shift()
+        await gate?.before?.()
+        const docs = placed.map((v) => ({ ...v }))
+        await gate?.after?.()
+        return { docs }
       },
-      create: async (args: { data: { weight: number } }) => {
-        await tick()
-        const v = { id: `v${++n}`, weight: args.data.weight }
+      create: async ({ data }: { data: Vote }) => {
+        for (const f of unique)
+          if (data[f] != null && placed.some((v) => v[f] === data[f]))
+            throw Object.assign(new Error(`The following field is invalid: ${f}`), { status: 400, data: { errors: [{ path: f, message: 'Value must be unique' }] } })
+        const v = { id: `v${++n}`, ...data }
         placed.push(v)
         return v
       },
-      delete: async (args: { id: string }) => {
-        await tick()
-        placed.splice(placed.findIndex((v) => v.id === args.id), 1)
-      },
+      delete: async ({ id }: { id: string }) => void placed.splice(placed.findIndex((v) => v.id === id), 1),
     }
-    for (let round = 0; round < 20; round++) {
-      placed.length = 0
-      const results = await Promise.allSettled([
-        allocateVotes(payload as never, { item: 'i', user: 'u', votes: 2 }),
-        allocateVotes(payload as never, { item: 'i', user: 'u', votes: 2 }),
-      ])
-      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1)
-      expect(placed.reduce((s, v) => s + v.weight, 0)).toBe(2)
-    }
+    const spent = () => placed.reduce((s, v) => s + v.weight, 0)
+    return { payload: payload as never, placed, gates, spent }
+  }
+  const place = (payload: never, votes: number) => allocateVotes(payload, { item: 'i', user: 'u', votes })
+
+  it('lets one of two colliding placements through, never overspending', async () => {
+    // Both read the same balance (2) before either saves: the worst case, every time.
+    const { payload, placed, gates, spent } = store(2)
+    const read = barrier(2)
+    gates.push({ after: read }, { after: read })
+    const [a, b] = await Promise.allSettled([place(payload, 2), place(payload, 2)])
+    expect(a.status).toBe('fulfilled')
+    expect(b).toMatchObject({ status: 'rejected', reason: { message: 'You don’t have that many votes available.' } })
+    expect([placed.length, spent()]).toEqual([1, 2])
+  })
+
+  it('places both when the balance covers both, the second on the next slot', async () => {
+    const { payload, placed, gates, spent } = store(4)
+    const read = barrier(2)
+    gates.push({ after: read }, { after: read })
+    const results = await Promise.allSettled([place(payload, 2), place(payload, 2)])
+    expect(results.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled'])
+    expect([placed.map((v) => v.slot), spent()]).toEqual([['u::1', 'u::2'], 4])
+  })
+
+  it('undoes both rather than overspend when a withdrawal lands between their reads', async () => {
+    // Earned 3, spent 2 on slots 1 and 2. A reads both; slot 2 is withdrawn; B reads one. Their
+    // slots differ (3 and 2), so both save; the check after saving must catch the overspend.
+    const { payload, placed, gates, spent } = store(3, [
+      { id: 'old1', slot: 'u::1', weight: 1, ballot: 'placed:1' },
+      { id: 'old2', slot: 'u::2', weight: 1, ballot: 'placed:2' },
+    ])
+    const read = barrier(2)
+    const check = barrier(2)
+    const withdraw = async () => void placed.splice(placed.findIndex((v) => v.id === 'old2'), 1)
+    gates.push({ after: async () => (await withdraw(), read()) }, { after: read }, { before: check }, { before: check })
+    const results = await Promise.allSettled([place(payload, 1), place(payload, 2)])
+    expect(results.map((r) => r.status)).toEqual(['rejected', 'rejected'])
+    expect([placed.map((v) => v.id), spent()]).toEqual([['old1'], 1])
   })
 })

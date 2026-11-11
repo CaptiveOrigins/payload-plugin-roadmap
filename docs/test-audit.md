@@ -2,6 +2,17 @@
 
 Kept by this repo's owning session, per `~/Code/CLAUDE.md` "Test self-audits". Newest first.
 
+## 2026-11-11: the colliding-placements flake was the code
+
+Suite: 39 → 41 tests in 2 files. Made-up data and the in-memory fake only.
+
+- **Cause.** A real race in `allocateVotes`, not a timing assumption in the test. Two placements that read the same balance both saved, both saw the overspend, both undid themselves, then retried after a random 25–175 ms pause. When the pauses landed close together three times running, both were refused even though the balance covered one. Reproduced 2 times in 24 runs before the fix; every failure was zero placements through, never two (overspending never happened).
+- **Fix.** A new `slot` field on votes with a unique index (sparse on Mongo, as Payload makes it for non-required unique fields). Each placement writes `<user>:<scope>:<n>`, one past the highest slot it read. Of two placements that read the same balance, the second save fails on the index and reads again, so exactly one goes through. The check after saving stays, now undoing and refusing without retrying, for the rare case where a withdrawal lands between two reads and they take different slots. API voters can't send a `slot` (403). No random pauses remain.
+- **Tests.** The flaky test now holds both reads at a barrier, so the collision happens on every run, with no timers. The store enforces the votes collection's own `unique` fields. Added "places both when the balance covers both…" and "undoes both rather than overspend when a withdrawal lands between their reads"; the client-sent refusal test also covers `slot`. The new tests fail against the old code (4 of 41).
+- **Mutation checks.** 8 mutations, each restored byte for byte (SHA-256), all caught: no slot written, slot not unique, slot reusing the top number, a random slot, a duplicate rethrown, no retry after a duplicate, the check after saving removed, and a client allowed to send a slot.
+- **Stability.** The full suite passed 10 runs in 10.
+- **Not tested.** Against a real database. The `slot` column on Postgres or SQLite needs a migration from the host.
+
 ## 2026-11-10: the lead's fixes after the first audit
 
 Suite: 34 → 39 tests in 2 files. Made-up data and the in-memory fake only.
@@ -17,7 +28,7 @@ Tests (`access-and-votes.test.ts`): "always votes as the signed-in voter…" (no
 
 Mutation check: dropping the collection check from the hook fails 1 test; rewriting instead of refusing fails 1; putting the old condition back fails 2; dropping the collection check from read and delete fails 1. Each file was restored byte for byte.
 
-Still open: "lets one of two colliding placements through, never overspending" depends on timers and failed once in about eight runs here, unrelated to this change.
+Still open: "lets one of two colliding placements through, never overspending" depends on timers and failed once in about eight runs here, unrelated to this change. (Fixed 2026-11-11, above.)
 
 ## 2026-11-10: first audit
 

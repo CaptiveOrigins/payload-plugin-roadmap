@@ -139,8 +139,8 @@ describe('casting votes through the API', () => {
     }
   })
 
-  it('refuses a voter, weight or ballot sent by the client', async () => {
-    for (const data of [{ user: 'someone-else' }, { weight: 50 }, { weight: 0 }, { ballot: 'placed:x' }, { user: 'someone-else', ballot: 'placed:x', weight: 50 }])
+  it('refuses a voter, weight, ballot or placement slot sent by the client', async () => {
+    for (const data of [{ user: 'someone-else' }, { weight: 50 }, { weight: 0 }, { ballot: 'placed:x' }, { slot: 'u1::1' }, { user: 'someone-else', ballot: 'placed:x', weight: 50 }])
       await expect(run({ item: 'i1', ...data }, voter, { id: 'i1', tenant: 't1' })).rejects.toMatchObject({ status: 403 })
   })
 

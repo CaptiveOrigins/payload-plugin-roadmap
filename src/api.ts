@@ -54,7 +54,7 @@ export const FREE_BALLOT = 'free'
 /** Refusals meant for the voter (not enough votes, still locked…). */
 export class RoadmapError extends Error {}
 
-type VoteDoc = { id: string; item: unknown; user: unknown; ballot?: string | null; weight?: number | null; createdAt: string }
+type VoteDoc = { id: string; item: unknown; user: unknown; ballot?: string | null; slot?: string | null; weight?: number | null; createdAt: string }
 
 /** Set the stored totals from the votes themselves (never incremented, so they cannot drift). */
 export async function recountVotes(payload: Payload, item: string, req?: PayloadRequest) {
@@ -150,23 +150,34 @@ const getItem = async (payload: Payload, id: string) =>
 export const releases = (opts: ResolvedRoadmapOptions, stage?: string | null) =>
   Boolean(stage && opts.allocation?.releaseStages?.includes(stage))
 
+const earnedVotes = async (payload: Payload, args: { user: string; scope?: string }) =>
+  Math.floor((await optionsOf(payload).allocation!.earned({ payload, user: args.user, scope: args.scope })) + 1e-9)
+const spentOn = (placed: VoteDoc[]) => placed.reduce((n, v) => n + (v.weight ?? 0), 0)
+
 /** Earned, spent and available extra votes for a user (in a scope). */
 export async function voteBalance(payload: Payload, args: { user: string; scope?: string }) {
   const opts = optionsOf(payload)
   if (!opts.allocation) return { earned: 0, spent: 0, available: 0 }
-  const earned = Math.floor((await opts.allocation.earned({ payload, user: args.user, scope: args.scope })) + 1e-9)
-  const spent = (await placedVotes(payload, args.user, args.scope)).reduce((n, v) => n + (v.weight ?? 0), 0)
+  const earned = await earnedVotes(payload, args)
+  const spent = spentOn(await placedVotes(payload, args.user, args.scope))
   return { earned, spent, available: Math.max(0, earned - spent) }
 }
 
+/** The user's next placement slot in a scope: one more than the highest among `placed`. */
+const nextSlot = (user: string, scope: string | undefined, placed: VoteDoc[]) => {
+  const top = placed.reduce((n, v) => Math.max(n, Number(/:(\d+)$/.exec(v.slot ?? '')?.[1] ?? 0)), 0)
+  return `${user}:${scope ?? ''}:${top + 1}`
+}
+
 /**
- * Place `votes` extra votes on an item, spent from the balance at once. The
- * balance is checked again after saving, so two placements at the same moment
- * cannot overspend: an overspending placement is undone. When two collide, both
- * may back off; each then retries after a short random pause (up to `attempts`),
- * so one of them goes through and the other gets an honest "not enough votes".
+ * Place `votes` extra votes on an item, spent from the balance at once. Each
+ * placement takes the user's next slot, which is unique across the votes
+ * collection, so of two placements that read the same balance only one can
+ * save; the other reads again and either places on the new balance or gets an
+ * honest "not enough votes". The balance is also checked again after saving,
+ * so an overspending placement is undone and refused, never kept.
  */
-export async function allocateVotes(payload: Payload, args: { item: string; user: string; votes: number; scope?: string }, { attempts = 3 }: { attempts?: number } = {}) {
+export async function allocateVotes(payload: Payload, args: { item: string; user: string; votes: number; scope?: string }, { attempts = 10 }: { attempts?: number } = {}) {
   const opts = optionsOf(payload)
   const votes = Math.floor(Number(args.votes))
   if (!opts.allocation) throw new RoadmapError('Extra votes are not enabled.')
@@ -176,24 +187,32 @@ export async function allocateVotes(payload: Payload, args: { item: string; user
   if (opts.allocation.boards && !opts.allocation.boards.includes(item.board)) throw new RoadmapError('Extra votes can’t be placed on this roadmap.')
   if (releases(opts, item.stage)) throw new RoadmapError('This item is not planned, so it can’t take extra votes.')
   for (let attempt = 1; ; attempt++) {
-    if ((await voteBalance(payload, args)).available < votes) throw new RoadmapError('You don’t have that many votes available.')
-    const vote = (await payload.create({
-      collection: opts.slugs.votes as CollectionSlug,
-      data: {
-        item: args.item,
-        user: args.user,
-        ballot: `placed:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`,
-        weight: votes,
-      } as never,
-      overrideAccess: true,
-      disableTransaction: true,
-    })) as { id: string }
+    const placed = await placedVotes(payload, args.user, args.scope)
+    if ((await earnedVotes(payload, args)) - spentOn(placed) < votes) throw new RoadmapError('You don’t have that many votes available.')
+    let vote: { id: string }
+    try {
+      vote = (await payload.create({
+        collection: opts.slugs.votes as CollectionSlug,
+        data: {
+          item: args.item,
+          user: args.user,
+          ballot: `placed:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 10)}`,
+          slot: nextSlot(args.user, args.scope, placed),
+          weight: votes,
+        } as never,
+        overrideAccess: true,
+        disableTransaction: true,
+      })) as { id: string }
+    } catch (error) {
+      // Another placement took this slot first: read the new balance and try again.
+      if (!isDuplicate(error)) throw error
+      if (attempt >= attempts) throw new RoadmapError('Votes are being placed elsewhere at the same moment. Try again.')
+      continue
+    }
     const after = await voteBalance(payload, args)
     if (after.spent <= after.earned) return vote
     await payload.delete({ collection: opts.slugs.votes as CollectionSlug, id: vote.id, overrideAccess: true })
-    if (attempt >= attempts) throw new RoadmapError('You don’t have that many votes available.')
-    // Collided with another placement: pause a random moment so the two don't retry in step.
-    await new Promise((resolve) => setTimeout(resolve, 25 + Math.random() * 150))
+    throw new RoadmapError('You don’t have that many votes available.')
   }
 }
 
