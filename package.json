@@ -1,10 +1,10 @@
 {
-  "name": "@captiveorigins/payload-plugin-roadmap",
+  "name": "@extantape/payload-plugin-roadmap",
   "version": "0.4.2",
   "description": "Roadmaps for Payload: public roadmap and voting, with items in curator-set stages, one vote per person per item, deduplicated requests and parent grouping.",
-  "homepage": "https://github.com/CaptiveOrigins/payload-plugin-roadmap#readme",
+  "homepage": "https://github.com/ExtantApe/payload-plugin-roadmap#readme",
   "bugs": {
-    "url": "https://github.com/CaptiveOrigins/payload-plugin-roadmap/issues"
+    "url": "https://github.com/ExtantApe/payload-plugin-roadmap/issues"
   },
   "keywords": [
     "payload",
@@ -17,7 +17,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/CaptiveOrigins/payload-plugin-roadmap.git"
+    "url": "git+https://github.com/ExtantApe/payload-plugin-roadmap.git"
   },
   "type": "module",
   "exports": {

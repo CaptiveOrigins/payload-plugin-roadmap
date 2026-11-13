@@ -23,8 +23,8 @@ Built for [Captive Origins](https://captiveorigins.com)'s Species Roadmap.
 
 **Works with:**
 
-- **Docs** (`@captiveorigins/payload-plugin-docs`): with `catalog: { docs: true }`, the catalog registers itself at `config.custom.docsSources` and calls Docs' `onFeatureChange` when an entry changes, so every feature gets a docs page. No import either way, and without Docs it does nothing. See [Features catalog](#features-catalog).
-- **Membership** (`@captiveorigins/payload-plugin-membership`): your `allocation.earned` function can count votes members have earned. There's no adapter for this. It's your own code.
+- **Docs** (`@extantape/payload-plugin-docs`): with `catalog: { docs: true }`, the catalog registers itself at `config.custom.docsSources` and calls Docs' `onFeatureChange` when an entry changes, so every feature gets a docs page. No import either way, and without Docs it does nothing. See [Features catalog](#features-catalog).
+- **Membership** (`@extantape/payload-plugin-membership`): your `allocation.earned` function can count votes members have earned. There's no adapter for this. It's your own code.
 - **Multi-tenant** (`@payloadcms/plugin-multi-tenant`): list `roadmap-items` and `roadmap-votes` in it and set `scopeField: 'tenant'`, and each site has its own roadmap.
 
 **Family.** Roadmap is in the Patronage family, with Membership, Sponsors, Backing, Credits and Printify. Docs is in a different family (Library), so that pairing is "works with". The families are a working draft that may change.
@@ -32,11 +32,11 @@ Built for [Captive Origins](https://captiveorigins.com)'s Species Roadmap.
 ## Install
 
 ```bash
-npm install @captiveorigins/payload-plugin-roadmap
+npm install @extantape/payload-plugin-roadmap
 ```
 
 ```ts
-import { roadmapPlugin } from '@captiveorigins/payload-plugin-roadmap'
+import { roadmapPlugin } from '@extantape/payload-plugin-roadmap'
 
 export default buildConfig({
   plugins: [
@@ -113,7 +113,7 @@ boards, `category`, `audience` (everyone or members), `order`, `details` and `li
 Render it on a page:
 
 ```ts
-import { getCatalog } from '@captiveorigins/payload-plugin-roadmap'
+import { getCatalog } from '@extantape/payload-plugin-roadmap'
 
 const sections = await getCatalog(payload, { scope: tenantId, locale: 'de', fallbackLocale: 'en' })
 // [{ slug, title, summary, intro, entries: [{ slug, title, summary, status, details, links, votes }] }]
@@ -124,7 +124,7 @@ suggest new entries through the board as usual; once an editor gives one a categ
 in the catalog as Planned.
 
 **Docs for every entry.** With `catalog: { docs: true }` (or `{ docs: { name } }`), the catalog
-feeds a docs plugin such as `@captiveorigins/payload-plugin-docs`, with no import either way:
+feeds a docs plugin such as `@extantape/payload-plugin-docs`, with no import either way:
 
 - it registers itself at `config.custom.docsSources`, so the docs plugin's nightly sync reads every visible entry;
 - after an entry changes, it calls the docs plugin's `onFeatureChange` when that's there, so the page follows: made, marked out of date, or archived when the entry is hidden, declined, merged or deleted.
@@ -139,7 +139,7 @@ site-path links, stage and section). The catalog isn't split by site for docs.
 For server actions and endpoints that have already checked the user and scope (they run with `overrideAccess`):
 
 ```ts
-import { castVote, removeVote, requestItem, recountVotes } from '@captiveorigins/payload-plugin-roadmap'
+import { castVote, removeVote, requestItem, recountVotes } from '@extantape/payload-plugin-roadmap'
 
 await requestItem(payload, { board: 'species', title: 'Testudo graeca', subject: taxonId, scope: tenantId, user: userId })
 await castVote(payload, { item, user })   // returns the existing vote if there is one

@@ -95,7 +95,7 @@ export type RoadmapPluginOptions = {
     /** Stages left out of the catalog. Default ['declined']. */
     hiddenStages?: string[]
     /**
-     * Feed the catalog to a docs plugin (such as @captiveorigins/payload-plugin-docs) with no import either way:
+     * Feed the catalog to a docs plugin (such as @extantape/payload-plugin-docs) with no import either way:
      * the catalog registers as a feature source and tells it when an entry changes. Default off.
      */
     docs?: boolean | { name?: string }
