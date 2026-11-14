@@ -13,9 +13,7 @@ A public roadmap with voting for [Payload](https://payloadcms.com) 3.
 - **Boards** keep separate roadmaps (e.g. features and species) in one pair of collections.
 - **Scopes.** With `scopeField` (e.g. `tenant` from the multi-tenant plugin) each site has its own roadmap.
 
-**Status: beta (0.x).** Used by [Captive Origins](https://captiveorigins.com); the API may still change before 1.0.
-
-Built for [Captive Origins](https://captiveorigins.com)'s Species Roadmap.
+**Status: beta (0.x).** Used on a live site, where it was first built for a species roadmap. The API may still change before 1.0.
 
 ## On its own, and with others
 
